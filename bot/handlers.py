@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import logging
 import re
-from pathlib import Path
 
 from aiogram import F, Router
 from aiogram.enums import ChatAction
@@ -21,7 +20,7 @@ from social_video_fetch import (
 logger = logging.getLogger(__name__)
 
 
-def build_router(download_dir: Path, max_upload_bytes: int) -> Router:
+def build_router(max_upload_bytes: int) -> Router:
     router = Router(name="social_video_bot")
 
     @router.message(CommandStart())
@@ -50,7 +49,7 @@ def build_router(download_dir: Path, max_upload_bytes: int) -> Router:
         status = await message.reply("Качаю…")
         await message.bot.send_chat_action(message.chat.id, ChatAction.UPLOAD_VIDEO)
         try:
-            clip = await download_social_video(url, download_dir, max_upload_bytes)
+            clip = await download_social_video(url, max_upload_bytes)
         except SocialVideoTooLargeError as exc:
             await status.edit_text(
                 f"Файл ~{exc.size_bytes / 1024 / 1024:.1f} МБ — больше лимита Telegram "

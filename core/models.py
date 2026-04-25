@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import shutil
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -20,14 +21,8 @@ class ShortVideoDownload:
     webpage_url: str
 
     def cleanup(self) -> None:
+        """Удаляет весь рабочий каталог скачивания (мусор от yt-dlp, не только mp4)."""
         try:
-            if self.file_path.exists():
-                self.file_path.unlink()
+            shutil.rmtree(self.file_path.parent, ignore_errors=True)
         except OSError:
-            logger.warning("Failed to remove %s", self.file_path, exc_info=True)
-        parent = self.file_path.parent
-        try:
-            if parent.exists() and not any(parent.iterdir()):
-                parent.rmdir()
-        except OSError:
-            pass
+            logger.warning("Failed to remove %s", self.file_path.parent, exc_info=True)

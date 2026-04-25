@@ -24,16 +24,16 @@ async def run() -> None:
     _configure_logging()
     log = logging.getLogger("social_video_bot")
 
-    token, download_dir, max_bytes = load_settings()
+    token, max_bytes = load_settings()
     bot = Bot(
         token=token,
         default=DefaultBotProperties(parse_mode=ParseMode.HTML),
     )
     dp = Dispatcher()
-    dp.include_router(build_router(download_dir, max_bytes))
+    dp.include_router(build_router(max_bytes))
 
     me = await bot.get_me()
-    log.info("Bot @%s started. DOWNLOAD_DIR=%s", me.username, download_dir)
+    log.info("Bot @%s started.", me.username)
 
     try:
         await bot.delete_webhook(drop_pending_updates=True)

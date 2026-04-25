@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import shutil
-import uuid
+import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -108,13 +108,15 @@ def _download_merged_mp4_sync(url: str, work_dir: Path) -> ShortVideoDownload:
 
 async def download_social_video(
     url: str,
-    download_root: Path,
     max_bytes: int,
 ) -> ShortVideoDownload:
-    """Скачать один публичный TikTok / Reels (и всё, что yt-dlp отдаёт тем же пайплайном)."""
+    """Скачать один публичный TikTok / Reels (и всё, что yt-dlp отдаёт тем же пайплайном).
 
-    work_dir = download_root / uuid.uuid4().hex
-    work_dir.mkdir(parents=True, exist_ok=True)
+    Файл пишется во временный каталог ОС (как требует yt-dlp); после отправки в Telegram
+    вызывай ``ShortVideoDownload.cleanup()`` — на сервере ничего не копим.
+    """
+
+    work_dir = Path(tempfile.mkdtemp(prefix="svf_"))
 
     try:
         clip = await asyncio.to_thread(_download_merged_mp4_sync, url, work_dir)
