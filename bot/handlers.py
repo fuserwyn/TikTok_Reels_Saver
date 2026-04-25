@@ -26,9 +26,7 @@ def build_router(max_upload_bytes: int) -> Router:
     @router.message(CommandStart())
     async def on_start(message: Message) -> None:
         await message.answer(
-            "Пришли ссылку на TikTok или Instagram Reels (только в личке с ботом). "
-            "Скачаю видео и отправлю файлом (до 50 МБ — лимит Telegram).\n\n"
-            "Переменные окружения — в .env.example (cookies, если TikTok не качается).",
+            "Ссылка на TikTok или Reels в этот чат — пришлю видео.",
         )
 
     @router.message(Command("help"))
