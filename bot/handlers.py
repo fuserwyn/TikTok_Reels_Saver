@@ -36,10 +36,9 @@ def _user_text_for_social_error(exc: SocialVideoError) -> str:
             )
         ):
             return (
-                "YouTube требует куки залогиненного аккаунта (иначе пишет «войдите, чтобы "
-                "подтвердить, что вы не бот»). Экспортируй cookies с youtube.com в "
-                "Netscape cookies.txt и в Railway/сервере укажи YT_DLP_COOKIEFILE на этот "
-                "файл. Подсказка: в wiki yt-dlp — «Exporting YouTube cookies»."
+                "YouTube с IP сервера часто требует «войти»; бот уже качает как моб. клиент "
+                "(android/ios), без кук. Если снова эта ошибка — YT_DLP_COOKIEFILE с "
+                "youtube.com, смена IP/хостинга или свежий yt-dlp. Wiki: Exporting YouTube cookies."
             )
     if "tiktok" in s:
         return (
