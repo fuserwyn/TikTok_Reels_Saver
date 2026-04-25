@@ -21,6 +21,42 @@ from social_video_fetch import (
 logger = logging.getLogger(__name__)
 
 
+def _user_text_for_social_error(exc: SocialVideoError) -> str:
+    """Короткое объяснение вместо длинного текста от yt-dlp (не светим FAQ в чате)."""
+    s = str(exc).lower()
+    if "[youtube]" in s:
+        if any(
+            x in s
+            for x in (
+                "sign in",
+                "not a bot",
+                "use --cookies",
+                "подтвердите",
+                "confirm you",
+            )
+        ):
+            return (
+                "YouTube требует куки залогиненного аккаунта (иначе пишет «войдите, чтобы "
+                "подтвердить, что вы не бот»). Экспортируй cookies с youtube.com в "
+                "Netscape cookies.txt и в Railway/сервере укажи YT_DLP_COOKIEFILE на этот "
+                "файл. Подсказка: в wiki yt-dlp — «Exporting YouTube cookies»."
+            )
+    if "tiktok" in s:
+        return (
+            "Не вышло скачать с TikTok. Попробуй полную ссылку @…/video/…, обнови "
+            "yt-dlp в образе или укажи YT_DLP_COOKIEFILE / cookies c сайта."
+        )
+    if "instagram" in s or "reel" in s:
+        return (
+            "Не вышло скачать с Reels. Попробуй ссылку вида instagram.com/reel/… "
+            "или укажи YT_DLP_COOKIEFILE."
+        )
+    return (
+        "Не вышлось скачать. Попробуй другую ссылку, обнови yt-dlp в контейнере "
+        "или укажи YT_DLP_COOKIEFILE (Netscape cookies.txt с нужного сайта)."
+    )
+
+
 def build_router(max_upload_bytes: int) -> Router:
     router = Router(name="social_video_bot")
 
@@ -61,11 +97,7 @@ def build_router(max_upload_bytes: int) -> Router:
             return
         except SocialVideoError as exc:
             logger.warning("download failed: %s", exc)
-            await status.edit_text(
-                f"Не вышло скачать: {exc}\n\n"
-                "Попробуй полную ссылку www.tiktok.com/@…/video/…, обнови yt-dlp в образе "
-                "или задай YT_DLP_COOKIEFILE (cookies.txt)."
-            )
+            await status.edit_text(_user_text_for_social_error(exc))
             return
         except Exception:
             logger.exception("unexpected download error")
