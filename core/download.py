@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import os
 import shutil
 import tempfile
 from pathlib import Path
@@ -17,35 +16,6 @@ from .models import ShortVideoDownload
 from .tiktok_expand import TIKTOK_UA, expand_tiktok_short_url
 
 logger = logging.getLogger(__name__)
-
-
-def _is_youtube_url(url: str) -> bool:
-    u = url.lower()
-    return "youtube.com" in u or "youtu.be" in u
-
-
-def _merge_youtube_extractor_bypass(opts: dict[str, Any], url: str) -> None:
-    """Чаще обходим «Sign in to confirm you’re not a bot» без cookies: не web-страница, а API моб. клиентов.
-
-    Гарантии нет: с IP датацентра Google иногда требует вход даже с этим — тогда помогают куки или другой IP.
-    Отключение: YOUTUBE_DISABLE_EXTRACTOR_BYPASS=1
-    """
-
-    if not _is_youtube_url(url) or (os.getenv("YOUTUBE_DISABLE_EXTRACTOR_BYPASS") or "").strip() in (
-        "1",
-        "true",
-        "yes",
-    ):
-        return
-    ex = dict(opts.get("extractor_args") or {})
-    yt = dict(ex.get("youtube") or {})
-    if yt.get("player_client"):
-        return
-    # Порядок: android/ios обычно мягче к headless, web — fallback
-    yt["player_client"] = ["android", "ios", "web"]
-    ex["youtube"] = yt
-    opts["extractor_args"] = ex
-    logger.debug("youtube: extractor player_client=android,ios,web (no-cookie bypass)")
 
 
 def _extract_uploader(info: dict[str, Any]) -> str:
@@ -83,7 +53,6 @@ def _download_merged_mp4_sync(url: str, work_dir: Path) -> ShortVideoDownload:
         "restrictfilenames": True,
     }
     apply_ytdlp_cookiefile(opts)
-    _merge_youtube_extractor_bypass(opts, url)
     if "tiktok.com" in url.lower():
         opts["http_headers"] = {"User-Agent": TIKTOK_UA}
 
@@ -141,7 +110,7 @@ async def download_social_video(
     url: str,
     max_bytes: int,
 ) -> ShortVideoDownload:
-    """Скачать один публичный TikTok / Reels / YouTube Shorts (и то, что yt-dlp тянет тем же пайплайном).
+    """Скачать один публичный TikTok / Reels (и то, что yt-dlp тянет тем же пайплайном).
 
     Файл пишется во временный каталог ОС (как требует yt-dlp); после отправки в Telegram
     вызывай ``ShortVideoDownload.cleanup()`` — на сервере ничего не копим.

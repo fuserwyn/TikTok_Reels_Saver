@@ -15,7 +15,6 @@ from social_video_fetch import (
     download_social_video,
     find_instagram_reel_url,
     find_tiktok_url,
-    find_youtube_shorts_url,
 )
 
 logger = logging.getLogger(__name__)
@@ -24,22 +23,6 @@ logger = logging.getLogger(__name__)
 def _user_text_for_social_error(exc: SocialVideoError) -> str:
     """Короткое объяснение вместо длинного текста от yt-dlp (не светим FAQ в чате)."""
     s = str(exc).lower()
-    if "[youtube]" in s:
-        if any(
-            x in s
-            for x in (
-                "sign in",
-                "not a bot",
-                "use --cookies",
-                "подтвердите",
-                "confirm you",
-            )
-        ):
-            return (
-                "YouTube с IP сервера часто требует «войти»; бот уже качает как моб. клиент "
-                "(android/ios), без кук. Если снова эта ошибка — YT_DLP_COOKIEFILE с "
-                "youtube.com, смена IP/хостинга или свежий yt-dlp. Wiki: Exporting YouTube cookies."
-            )
     if "tiktok" in s:
         return (
             "Не вышло скачать с TikTok. Попробуй полную ссылку @…/video/…, обнови "
@@ -62,7 +45,7 @@ def build_router(max_upload_bytes: int) -> Router:
     @router.message(CommandStart())
     async def on_start(message: Message) -> None:
         await message.answer(
-            "Ссылка на TikTok, Reels или YouTube Shorts в этот чат — пришлю видео.",
+            "Ссылка на TikTok или Reels в этот чат — пришлю видео.",
         )
 
     @router.message(Command("help"))
@@ -72,15 +55,11 @@ def build_router(max_upload_bytes: int) -> Router:
     @router.message(F.text, F.chat.type == "private")
     async def on_text(message: Message) -> None:
         text = message.text or ""
-        url = (
-            find_tiktok_url(text)
-            or find_instagram_reel_url(text)
-            or find_youtube_shorts_url(text)
-        )
+        url = find_tiktok_url(text) or find_instagram_reel_url(text)
         if not url:
             await message.answer(
-                "Нужна ссылка TikTok, Reels (instagram.com/reel/…) "
-                "или YouTube Shorts (youtube.com/shorts/…).",
+                "Нужна ссылка TikTok (tiktok.com, vm.tiktok.com, …) "
+                "или Reels (instagram.com/reel/…).",
             )
             return
 
@@ -108,8 +87,6 @@ def build_router(max_upload_bytes: int) -> Router:
             open_label, open_url = "Открыть в Instagram", clip.webpage_url
         elif "tiktok.com" in low:
             open_label, open_url = "Открыть в TikTok", clip.webpage_url
-        elif "youtube.com" in low or "youtu.be" in low:
-            open_label, open_url = "Открыть в YouTube", clip.webpage_url
         else:
             open_label, open_url = "Открыть", clip.webpage_url
 

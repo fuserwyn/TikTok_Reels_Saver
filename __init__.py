@@ -7,7 +7,6 @@ from .core import (
     download_social_video,
     find_instagram_reel_url,
     find_tiktok_url,
-    find_youtube_shorts_url,
 )
 
 __all__ = [
@@ -17,5 +16,4 @@ __all__ = [
     "download_social_video",
     "find_instagram_reel_url",
     "find_tiktok_url",
-    "find_youtube_shorts_url",
 ]
