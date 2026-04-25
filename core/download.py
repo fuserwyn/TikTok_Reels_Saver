@@ -110,7 +110,7 @@ async def download_social_video(
     url: str,
     max_bytes: int,
 ) -> ShortVideoDownload:
-    """Скачать один публичный TikTok / Reels (и всё, что yt-dlp отдаёт тем же пайплайном).
+    """Скачать один публичный TikTok / Reels / YouTube Shorts (и то, что yt-dlp тянет тем же пайплайном).
 
     Файл пишется во временный каталог ОС (как требует yt-dlp); после отправки в Telegram
     вызывай ``ShortVideoDownload.cleanup()`` — на сервере ничего не копим.

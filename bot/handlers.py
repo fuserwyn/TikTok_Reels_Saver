@@ -15,6 +15,7 @@ from social_video_fetch import (
     download_social_video,
     find_instagram_reel_url,
     find_tiktok_url,
+    find_youtube_shorts_url,
 )
 
 logger = logging.getLogger(__name__)
@@ -26,7 +27,7 @@ def build_router(max_upload_bytes: int) -> Router:
     @router.message(CommandStart())
     async def on_start(message: Message) -> None:
         await message.answer(
-            "Ссылка на TikTok или Reels в этот чат — пришлю видео.",
+            "Ссылка на TikTok, Reels или YouTube Shorts в этот чат — пришлю видео.",
         )
 
     @router.message(Command("help"))
@@ -36,11 +37,15 @@ def build_router(max_upload_bytes: int) -> Router:
     @router.message(F.text, F.chat.type == "private")
     async def on_text(message: Message) -> None:
         text = message.text or ""
-        url = find_tiktok_url(text) or find_instagram_reel_url(text)
+        url = (
+            find_tiktok_url(text)
+            or find_instagram_reel_url(text)
+            or find_youtube_shorts_url(text)
+        )
         if not url:
             await message.answer(
-                "Нужна ссылка TikTok (tiktok.com, vm.tiktok.com, …) или Reels "
-                "(instagram.com/reel/…)."
+                "Нужна ссылка TikTok, Reels (instagram.com/reel/…) "
+                "или YouTube Shorts (youtube.com/shorts/…).",
             )
             return
 
@@ -72,6 +77,8 @@ def build_router(max_upload_bytes: int) -> Router:
             open_label, open_url = "Открыть в Instagram", clip.webpage_url
         elif "tiktok.com" in low:
             open_label, open_url = "Открыть в TikTok", clip.webpage_url
+        elif "youtube.com" in low or "youtu.be" in low:
+            open_label, open_url = "Открыть в YouTube", clip.webpage_url
         else:
             open_label, open_url = "Открыть", clip.webpage_url
 
@@ -84,7 +91,12 @@ def build_router(max_upload_bytes: int) -> Router:
             vext = clip.file_path.suffix.lower()
             if vext not in (".mp4", ".webm"):
                 vext = ".mp4"
-            caption = f"{hbold(clip.title)}\n{clip.artist}"
+            me = await message.bot.get_me()
+            if me.username:
+                credit = f"\n\nВидео сгенерировано ботом @{me.username}"
+            else:
+                credit = ""
+            caption = f"{hbold(clip.title)}\n{clip.artist}{credit}"
             await message.answer_video(
                 video=FSInputFile(clip.file_path, filename=f"{safe}{vext}"),
                 caption=caption,

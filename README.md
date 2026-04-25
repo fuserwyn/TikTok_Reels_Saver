@@ -1,4 +1,4 @@
-# Social Video Fetch — отдельный проект (TikTok + Reels)
+# Social Video Fetch — отдельный проект (TikTok, Reels, YouTube Shorts)
 
 Готовый мини-репозиторий: **библиотека** `social_video_fetch/` + **Telegram-бот** `bot/`, **Dockerfile** и **Railway**.
 
