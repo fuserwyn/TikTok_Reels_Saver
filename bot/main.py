@@ -11,7 +11,6 @@ from aiogram.enums import ParseMode
 from bot.config import load_database_url, load_settings, load_stats_admin_ids
 from bot.db import create_pool, init_schema
 from bot.handlers import build_router
-from bot.middleware import TrackUsersMiddleware
 
 
 def _configure_logging() -> None:
@@ -43,7 +42,6 @@ async def run() -> None:
         default=DefaultBotProperties(parse_mode=ParseMode.HTML),
     )
     dp = Dispatcher()
-    dp.update.middleware(TrackUsersMiddleware(pool))
     dp.include_router(build_router(max_bytes, pool, stats_admins))
 
     me = await bot.get_me()

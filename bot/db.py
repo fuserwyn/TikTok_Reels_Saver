@@ -37,10 +37,15 @@ async def create_pool(database_url: str) -> asyncpg.Pool:
     return pool
 
 
+_MIGRATE = """
+ALTER TABLE bot_users ADD COLUMN IF NOT EXISTS request_count BIGINT NOT NULL DEFAULT 0;
+"""
+
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS bot_users (
     telegram_id BIGINT PRIMARY KEY,
     username VARCHAR(255),
+    request_count BIGINT NOT NULL DEFAULT 0,
     first_seen_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     last_seen_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
@@ -51,16 +56,24 @@ CREATE INDEX IF NOT EXISTS bot_users_last_seen_idx ON bot_users (last_seen_at DE
 async def init_schema(pool: asyncpg.Pool) -> None:
     async with pool.acquire() as conn:
         await conn.execute(_SCHEMA)
+        await conn.execute(_MIGRATE)
     logger.info("DB schema OK")
 
 
-async def upsert_user_visit(pool: asyncpg.Pool, telegram_id: int, username: str | None) -> None:
+async def increment_download_request(
+    pool: asyncpg.Pool | None, telegram_id: int, username: str | None
+) -> None:
+    """+1 к счётчику при попытке скачать по ссылке."""
+
+    if pool is None:
+        return
     await pool.execute(
         """
-        INSERT INTO bot_users (telegram_id, username, first_seen_at, last_seen_at)
-        VALUES ($1, $2, NOW(), NOW())
+        INSERT INTO bot_users (telegram_id, username, request_count, first_seen_at, last_seen_at)
+        VALUES ($1, $2, 1, NOW(), NOW())
         ON CONFLICT (telegram_id) DO UPDATE SET
             username = COALESCE(EXCLUDED.username, bot_users.username),
+            request_count = bot_users.request_count + 1,
             last_seen_at = NOW()
         """,
         telegram_id,
@@ -69,16 +82,15 @@ async def upsert_user_visit(pool: asyncpg.Pool, telegram_id: int, username: str 
 
 
 async def fetch_user_stats(pool: asyncpg.Pool) -> tuple[int, int]:
-    """Всего пользователей; впервые за сегодня (с начала дня UTC)."""
+    """Сколько строк (пользователей в таблице); сумма запросов."""
+
     row = await pool.fetchrow(
         """
         SELECT
-            COUNT(*)::bigint AS total,
-            COUNT(*) FILTER (
-                WHERE first_seen_at >= date_trunc('day', timezone('utc', now()))
-            )::bigint AS new_today_utc
+            COUNT(*)::bigint AS users,
+            COALESCE(SUM(request_count), 0)::bigint AS total_requests
         FROM bot_users
         """
     )
     assert row is not None
-    return int(row["total"]), int(row["new_today_utc"])
+    return int(row["users"]), int(row["total_requests"])

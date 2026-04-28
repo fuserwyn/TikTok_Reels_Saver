@@ -12,7 +12,7 @@ from aiogram.utils.markdown import hbold
 
 import asyncpg
 
-from bot.db import fetch_user_stats
+from bot.db import fetch_user_stats, increment_download_request
 from social_video_fetch import (
     SocialVideoError,
     SocialVideoTooLargeError,
@@ -59,10 +59,10 @@ def build_router(
         if pool is None:
             await message.answer("База данных не подключена (нет DATABASE_URL).")
             return
-        total, new_today = await fetch_user_stats(pool)
+        total_users, total_requests = await fetch_user_stats(pool)
         await message.answer(
-            f"Пользователей всего: {total}\n"
-            f"Новых за сегодня (UTC): {new_today}",
+            f"Пользователей в базе: {total_users}\n"
+            f"Всего запросов (скачиваний): {total_requests}",
         )
 
     @router.message(CommandStart())
@@ -85,6 +85,12 @@ def build_router(
                 "или Reels (instagram.com/reel/…).",
             )
             return
+
+        u = message.from_user
+        try:
+            await increment_download_request(pool, u.id if u else 0, u.username if u else None)
+        except Exception:
+            logger.exception("increment_download_request failed")
 
         status = await message.reply("Качаю…")
         await message.bot.send_chat_action(message.chat.id, ChatAction.UPLOAD_VIDEO)
