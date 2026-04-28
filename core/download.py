@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import shutil
+import subprocess
 import tempfile
 from pathlib import Path
 from typing import Any
@@ -45,6 +47,86 @@ def _read_video_duration(file_path: Path) -> int:
         return 0
 
 
+def _maybe_faststart_mp4(file_path: Path) -> None:
+    """Перемещает ``moov`` в начало (``+faststart``) без перекодирования — часто нужно iOS/Telegram iPhone."""
+
+    if (os.getenv("VIDEO_SKIP_FASTSTART") or "").strip().lower() in ("1", "true", "yes"):
+        return
+    if file_path.suffix.lower() != ".mp4":
+        return
+    out = file_path.with_name(file_path.stem + "._fast.mp4")
+    try:
+        subprocess.run(
+            [
+                "ffmpeg",
+                "-y",
+                "-hide_banner",
+                "-loglevel",
+                "error",
+                "-i",
+                str(file_path),
+                "-c",
+                "copy",
+                "-movflags",
+                "+faststart",
+                str(out),
+            ],
+            check=True,
+            timeout=900,
+        )
+        out.replace(file_path)
+    except Exception:
+        logger.warning("ffmpeg faststart (copy) failed, using original file", exc_info=True)
+        if out.exists():
+            out.unlink()
+
+
+def _maybe_transcode_ios_h264(file_path: Path) -> None:
+    """Полный перекод в H.264+AAC — тяжело по CPU; включи ``VIDEO_TRANSCODE_IOS=1`` если iPhone всё равно не качает."""
+
+    if (os.getenv("VIDEO_TRANSCODE_IOS") or "").strip().lower() not in (
+        "1",
+        "true",
+        "yes",
+    ):
+        return
+    if file_path.suffix.lower() != ".mp4":
+        return
+    out = file_path.with_name(file_path.stem + "._ios.mp4")
+    try:
+        subprocess.run(
+            [
+                "ffmpeg",
+                "-y",
+                "-hide_banner",
+                "-loglevel",
+                "error",
+                "-i",
+                str(file_path),
+                "-c:v",
+                "libx264",
+                "-profile:v",
+                "main",
+                "-pix_fmt",
+                "yuv420p",
+                "-c:a",
+                "aac",
+                "-b:a",
+                "128k",
+                "-movflags",
+                "+faststart",
+                str(out),
+            ],
+            check=True,
+            timeout=1_800,
+        )
+        out.replace(file_path)
+    except Exception:
+        logger.warning("ffmpeg iOS transcode failed, using previous file", exc_info=True)
+        if out.exists():
+            out.unlink()
+
+
 def _download_merged_mp4_sync(url: str, work_dir: Path) -> ShortVideoDownload:
     if "tiktok.com" in url.lower():
         url = expand_tiktok_short_url(url)
@@ -55,6 +137,8 @@ def _download_merged_mp4_sync(url: str, work_dir: Path) -> ShortVideoDownload:
     out_template = str(work_dir / "%(title).200B.%(ext)s")
     opts: dict[str, Any] = {
         "format": (
+            "bestvideo[vcodec^=avc1][ext=mp4]+bestaudio[ext=m4a]/"
+            "bestvideo[vcodec^=avc][ext=mp4]+bestaudio[ext=m4a]/"
             "bestvideo[ext=mp4][vcodec!=none]+bestaudio[ext=m4a]/"
             "bestvideo[vcodec!=none]+bestaudio/best[vcodec!=none]/best"
         ),
@@ -104,6 +188,18 @@ def _download_merged_mp4_sync(url: str, work_dir: Path) -> ShortVideoDownload:
             file_path = webms[0]
     if file_path is None or not file_path.exists():
         raise SocialVideoError("Скачанный файл не найден на диске.")
+
+    # iOS/Telegram часто не играют файл без faststart (moov в конце) или с HEVC — см. ниже
+    if file_path.suffix.lower() == ".mp4":
+        ios_tc = (os.getenv("VIDEO_TRANSCODE_IOS") or "").strip().lower() in (
+            "1",
+            "true",
+            "yes",
+        )
+        if ios_tc:
+            _maybe_transcode_ios_h264(file_path)
+        else:
+            _maybe_faststart_mp4(file_path)
 
     title = str(info.get("title") or file_path.stem)
     claimed = int(info.get("duration") or 0)
