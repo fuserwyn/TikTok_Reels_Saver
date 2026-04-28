@@ -47,6 +47,15 @@ def _read_video_duration(file_path: Path) -> int:
         return 0
 
 
+def _video_lightweight_only() -> bool:
+    """Только remux faststart без перекода — меньше CPU, хуже совместимость с iPhone."""
+
+    if (os.getenv("VIDEO_LIGHTWEIGHT") or "").strip().lower() in ("1", "true", "yes", "on"):
+        return True
+    # совместимость со старым VIDEO_TRANSCODE_IOS=0 (= не перекодировать)
+    return (os.getenv("VIDEO_TRANSCODE_IOS") or "").strip().lower() in ("0", "false", "no")
+
+
 def _maybe_faststart_mp4(file_path: Path) -> None:
     """Перемещает ``moov`` в начало (``+faststart``) без перекодирования — часто нужно iOS/Telegram iPhone."""
 
@@ -81,50 +90,82 @@ def _maybe_faststart_mp4(file_path: Path) -> None:
             out.unlink()
 
 
-def _maybe_transcode_ios_h264(file_path: Path) -> None:
-    """Полный перекод в H.264+AAC — тяжело по CPU; включи ``VIDEO_TRANSCODE_IOS=1`` если iPhone всё равно не качает."""
+def _ffmpeg_ios_encode_cmd(src: Path, dst: Path) -> list[str]:
+    """Один пайплайн для MP4 после yt-dlp и для webm/mkv → mp4."""
 
-    if (os.getenv("VIDEO_TRANSCODE_IOS") or "").strip().lower() not in (
-        "1",
-        "true",
-        "yes",
-    ):
-        return
+    return [
+        "ffmpeg",
+        "-y",
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-fflags",
+        "+genpts",
+        "-i",
+        str(src),
+        "-vsync",
+        "cfr",
+        "-vf",
+        "scale=trunc(iw/2)*2:trunc(ih/2)*2:flags=bilinear,format=yuv420p",
+        "-c:v",
+        "libx264",
+        "-preset",
+        "veryfast",
+        "-crf",
+        "23",
+        "-profile:v",
+        "high",
+        "-pix_fmt",
+        "yuv420p",
+        "-c:a",
+        "aac",
+        "-b:a",
+        "160k",
+        "-ar",
+        "44100",
+        "-movflags",
+        "+faststart",
+        "-avoid_negative_ts",
+        "make_zero",
+        str(dst),
+    ]
+
+
+def _transcode_in_place_for_ios_h264(file_path: Path) -> None:
+    """Перекод в H.264+AAC — по умолчанию вкл.; для экономии CPU см. VIDEO_LIGHTWEIGHT."""
+
     if file_path.suffix.lower() != ".mp4":
         return
     out = file_path.with_name(file_path.stem + "._ios.mp4")
     try:
-        subprocess.run(
-            [
-                "ffmpeg",
-                "-y",
-                "-hide_banner",
-                "-loglevel",
-                "error",
-                "-i",
-                str(file_path),
-                "-c:v",
-                "libx264",
-                "-profile:v",
-                "main",
-                "-pix_fmt",
-                "yuv420p",
-                "-c:a",
-                "aac",
-                "-b:a",
-                "128k",
-                "-movflags",
-                "+faststart",
-                str(out),
-            ],
-            check=True,
-            timeout=1_800,
-        )
+        subprocess.run(_ffmpeg_ios_encode_cmd(file_path, out), check=True, timeout=3_600)
         out.replace(file_path)
+        logger.info("ios transcode ok: %s", file_path.name)
     except Exception:
-        logger.warning("ffmpeg iOS transcode failed, using previous file", exc_info=True)
+        logger.warning("ffmpeg iOS transcode failed, keeping file as-is", exc_info=True)
         if out.exists():
             out.unlink()
+
+
+def _convert_to_ios_mp4_replace(src: Path) -> Path:
+    """webm/mkv → один mp4 под iOS; при ошибке возвращаем src."""
+
+    ext = src.suffix.lower()
+    if ext not in (".webm", ".mkv"):
+        return src
+    dst = src.with_suffix(".mp4")
+    tmp = src.with_name(src.stem + "._conv.mp4")
+    try:
+        subprocess.run(_ffmpeg_ios_encode_cmd(src, tmp), check=True, timeout=3_600)
+        src.unlink(missing_ok=True)
+        tmp.replace(dst)
+        logger.info("container→mp4 ios: %s", dst.name)
+        return dst
+    except Exception:
+        logger.warning("ffmpeg webm/mkv→mp4 failed", exc_info=True)
+        if tmp.exists():
+            tmp.unlink(missing_ok=True)
+        return src
 
 
 def _download_merged_mp4_sync(url: str, work_dir: Path) -> ShortVideoDownload:
@@ -189,17 +230,17 @@ def _download_merged_mp4_sync(url: str, work_dir: Path) -> ShortVideoDownload:
     if file_path is None or not file_path.exists():
         raise SocialVideoError("Скачанный файл не найден на диске.")
 
-    # iOS/Telegram часто не играют файл без faststart (moov в конце) или с HEVC — см. ниже
-    if file_path.suffix.lower() == ".mp4":
-        ios_tc = (os.getenv("VIDEO_TRANSCODE_IOS") or "").strip().lower() in (
-            "1",
-            "true",
-            "yes",
-        )
-        if ios_tc:
-            _maybe_transcode_ios_h264(file_path)
-        else:
+    # iPhone: «картинка на паузе, звук идёт» — типично HEVC/VFR/сломанные метки времени; нужен перекод H.264 CFR.
+    # По умолчанию полный перекод для mp4; VIDEO_LIGHTWEIGHT=1 — только faststart (-c copy), дешевле CPU, хуже для iOS.
+    # webm/mkv на iOS почти не играют — всегда конвертируем в mp4 тем же пайплайном.
+    ext = file_path.suffix.lower()
+    if ext in (".webm", ".mkv"):
+        file_path = _convert_to_ios_mp4_replace(file_path)
+    elif ext == ".mp4":
+        if _video_lightweight_only():
             _maybe_faststart_mp4(file_path)
+        else:
+            _transcode_in_place_for_ios_h264(file_path)
 
     title = str(info.get("title") or file_path.stem)
     claimed = int(info.get("duration") or 0)
