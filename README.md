@@ -40,7 +40,7 @@ python -m bot.main
 1. New Project → Deploy from GitHub (или пустой репо + `railway up`).
 2. **Root Directory** оставь пустым, если репозиторий = только эта папка; если монорепо — укажи подпапку с этим проектом.
 3. **Variables**: `TELEGRAM_API_KEY` = токен бота.
-4. **PostgreSQL** (опционально, чтобы считать пользователей): New → Database → PostgreSQL; Railway пробросит `DATABASE_URL` в переменные сервиса с ботом. Для `/stats` укажи `STATS_ADMIN_IDS` = свой Telegram numeric ID (узнать у @userinfobot).
+4. **PostgreSQL** (опционально, чтобы считать пользователей): New → Database → PostgreSQL; Railway пробросит `DATABASE_URL` в переменные сервиса с ботом. Для `/stats` укажи `STATS_ADMIN_IDS` = свой Telegram numeric ID (узнать у @userinfobot). Если при старте `CERTIFICATE_VERIFY_FAILED` — добавь переменную **`DATABASE_SSL=no-verify`**.
 5. Сервис подхватит `Dockerfile` и `railway.json`.
 
 Локально без Postgres бот работает как раньше; без `DATABASE_URL` учёт отключён.

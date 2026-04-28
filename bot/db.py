@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 import os
 import re
+import ssl as ssl_module
 from typing import Any
 
 import asyncpg
@@ -17,15 +18,35 @@ def normalize_database_url(url: str) -> str:
     return url
 
 
+def _ssl_context_no_verify() -> ssl_module.SSLContext:
+    """TLS без проверки сертификата (обход self-signed / прокси цепочки)."""
+
+    ctx = ssl_module.create_default_context(ssl_module.Purpose.SERVER_AUTH)
+    ctx.check_hostname = False
+    ctx.verify_mode = ssl_module.CERT_NONE
+    return ctx
+
+
 def _ssl_arg_for_url(url: str) -> Any:
-    """Локальный Postgres без TLS; облако — с TLS."""
-    explicit = (os.getenv("DATABASE_SSL") or "").strip().lower()
-    if explicit in ("0", "false", "no"):
+    """``DATABASE_SSL``: false | true | no-verify (или auto)."""
+
+    mode = (os.getenv("DATABASE_SSL") or "").strip().lower()
+    if mode in ("0", "false", "no", "off", "disable"):
         return False
-    if explicit in ("1", "true", "yes"):
+    if mode in ("no-verify", "insecure", "relaxed"):
+        return _ssl_context_no_verify()
+    if mode in ("1", "true", "yes", "require", "on"):
         return True
-    if re.search(r"@localhost|@127\.0\.0\.1", url, re.I):
+
+    if re.search(r"@localhost|@127\.0\.0\.1\b", url, re.I):
         return False
+
+    # auto: без явного DATABASE_SSL — многие хостинги шлют свой CA; verify падает на
+    # self-signed in chain → безопаснее для бота к БД в одной сети использовать no-verify
+    if not mode and re.search(r"railway\.app|\.internal|render\.com|neon\.tech", url, re.I):
+        logger.info("PostgreSQL: авто no-verify SSL (хостинг без публичной цепочки в образе)")
+        return _ssl_context_no_verify()
+
     return True
 
 
@@ -33,7 +54,8 @@ async def create_pool(database_url: str) -> asyncpg.Pool:
     url = normalize_database_url(database_url)
     ssl = _ssl_arg_for_url(url)
     pool = await asyncpg.create_pool(url, min_size=1, max_size=10, ssl=ssl)
-    logger.info("PostgreSQL pool ready (ssl=%s)", ssl)
+    ssl_log = "false" if ssl is False else ("no-verify" if isinstance(ssl, ssl_module.SSLContext) else "verify")
+    logger.info("PostgreSQL pool ready (ssl=%s)", ssl_log)
     return pool
 
 
