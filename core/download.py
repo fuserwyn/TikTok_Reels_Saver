@@ -106,8 +106,8 @@ def _ffmpeg_ios_encode_cmd(src: Path, dst: Path) -> list[str]:
         "-vsync",
         "cfr",
         "-vf",
-        # SAR → квадратные пиксели, затем масштаб с сохранением пропорций и чётными сторонами (-2)
-        r"scale=iw*max(sar\,1):ih:flags=bilinear,setsar=1,scale=-2:-2:flags=bilinear,format=yuv420p",
+        # Сохраняем соотношение сторон: обе «-2» = подобрать размер под чётные стороны без растягивания
+        "scale=-2:-2:flags=bilinear,format=yuv420p",
         "-c:v",
         "libx264",
         "-preset",
