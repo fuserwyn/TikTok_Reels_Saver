@@ -76,14 +76,22 @@ def _probe_video_display_size(path: Path) -> tuple[int | None, int | None]:
         return (None, None)
 
 
-# Публичный Reels иногда отдаётся стабильнее, чем дефолтный python-requests UA
-INSTAGRAM_HTTP_HEADERS = {
-    "User-Agent": (
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-        "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
-    ),
-    "Accept-Language": "en-US,en;q=0.9",
-}
+def _merge_instagram_extractor_opts(opts: dict[str, Any]) -> None:
+    """Опционально INSTAGRAM_APP_ID — другой X-IG-App-ID (см. wiki yt-dlp instagram)."""
+
+    raw = (os.getenv("INSTAGRAM_APP_ID") or "").strip()
+    if not raw:
+        return
+    ex = dict(opts.get("extractor_args") or {})
+    ig = dict(ex.get("instagram") or {})
+    ig["app_id"] = raw
+    ex["instagram"] = ig
+    opts["extractor_args"] = ex
+    logger.info("instagram extractor app_id from INSTAGRAM_APP_ID")
+
+
+# Не подменяем http_headers для Instagram — у yt-dlp свои заголовки API (X-IG-App-ID и т.д.);
+# подмена «браузерным» UA ломала скачивание с Railway без cookies.
 
 
 def _extract_uploader(info: dict[str, Any]) -> str:
@@ -250,7 +258,7 @@ def _download_merged_mp4_sync(url: str, work_dir: Path) -> ShortVideoDownload:
     if "tiktok.com" in low:
         opts["http_headers"] = {"User-Agent": TIKTOK_UA}
     elif "instagram.com" in low or "instagr.am" in low:
-        opts["http_headers"] = INSTAGRAM_HTTP_HEADERS
+        _merge_instagram_extractor_opts(opts)
 
     with YoutubeDL(opts) as ydl:
         try:

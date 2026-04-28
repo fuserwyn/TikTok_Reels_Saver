@@ -34,9 +34,10 @@ def _user_text_for_social_error(exc: SocialVideoError) -> str:
         )
     if "instagram" in s or "reel" in s:
         return (
-            "Не вышло скачать с Reels. С сервера (Railway/VPS) Instagram часто требует "
-            "cookies залогиненного аккаунта: файл Netscape cookie и YT_DLP_COOKIEFILE "
-            "(см. wiki yt-dlp). Либо проверь, что ролик открыт в браузере без входа."
+            "Не вышло скачать с Reels. Обнови образ (свежий yt-dlp) — у Instagram правки "
+            "выходят часто. С IP хостинга (Railway/VPS) часто нужны cookies: Netscape "
+            "cookies.txt и YT_DLP_COOKIEFILE (wiki yt-dlp). Или открой ролик в браузере "
+            "без входа — если там не идёт, и с бота не выйдет."
         )
     return (
         "Не вышлось скачать. Попробуй другую ссылку, обнови yt-dlp в контейнере "
