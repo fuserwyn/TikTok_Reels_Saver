@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import re
+from typing import FrozenSet
 
 from aiogram import F, Router
 from aiogram.enums import ChatAction
@@ -9,6 +10,9 @@ from aiogram.filters import Command, CommandStart
 from aiogram.types import FSInputFile, InlineKeyboardButton, InlineKeyboardMarkup, Message
 from aiogram.utils.markdown import hbold
 
+import asyncpg
+
+from bot.db import fetch_user_stats
 from social_video_fetch import (
     SocialVideoError,
     SocialVideoTooLargeError,
@@ -30,8 +34,9 @@ def _user_text_for_social_error(exc: SocialVideoError) -> str:
         )
     if "instagram" in s or "reel" in s:
         return (
-            "Не вышло скачать с Reels. Попробуй ссылку вида instagram.com/reel/… "
-            "или укажи YT_DLP_COOKIEFILE."
+            "Не вышло скачать с Reels. С сервера (Railway/VPS) Instagram часто требует "
+            "cookies залогиненного аккаунта: файл Netscape cookie и YT_DLP_COOKIEFILE "
+            "(см. wiki yt-dlp). Либо проверь, что ролик открыт в браузере без входа."
         )
     return (
         "Не вышлось скачать. Попробуй другую ссылку, обнови yt-dlp в контейнере "
@@ -39,8 +44,26 @@ def _user_text_for_social_error(exc: SocialVideoError) -> str:
     )
 
 
-def build_router(max_upload_bytes: int) -> Router:
+def build_router(
+    max_upload_bytes: int,
+    pool: asyncpg.Pool | None,
+    stats_admin_ids: FrozenSet[int],
+) -> Router:
     router = Router(name="social_video_bot")
+
+    @router.message(Command("stats"), F.chat.type == "private")
+    async def on_stats(message: Message) -> None:
+        uid = message.from_user.id if message.from_user else 0
+        if uid not in stats_admin_ids:
+            return
+        if pool is None:
+            await message.answer("База данных не подключена (нет DATABASE_URL).")
+            return
+        total, new_today = await fetch_user_stats(pool)
+        await message.answer(
+            f"Пользователей всего: {total}\n"
+            f"Новых за сегодня (UTC): {new_today}",
+        )
 
     @router.message(CommandStart())
     async def on_start(message: Message) -> None:

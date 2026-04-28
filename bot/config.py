@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+from typing import FrozenSet
 
 from dotenv import load_dotenv
 
@@ -15,3 +16,20 @@ def load_settings() -> tuple[str, int]:
         )
     max_bytes = int(os.getenv("MAX_UPLOAD_BYTES", str(50 * 1024 * 1024)))
     return token, max_bytes
+
+
+def load_database_url() -> str | None:
+    """PostgreSQL (Railway подставляет DATABASE_URL при подключении плагина)."""
+    return (os.getenv("DATABASE_URL") or "").strip() or None
+
+
+def load_stats_admin_ids() -> FrozenSet[int]:
+    raw = (os.getenv("STATS_ADMIN_IDS") or "").strip()
+    if not raw:
+        return frozenset()
+    ids: set[int] = set()
+    for part in raw.replace(";", ",").split(","):
+        part = part.strip()
+        if part.isdigit():
+            ids.add(int(part))
+    return frozenset(ids)

@@ -12,10 +12,12 @@
 ├── railway.json
 ├── requirements.txt
 ├── .env.example
-├── bot/                    # минимальный aiogram-бот
+├── bot/
 │   ├── main.py
 │   ├── config.py
-│   └── handlers.py
+│   ├── handlers.py
+│   ├── db.py              # PostgreSQL (учёт пользователей)
+│   └── middleware.py
 ├── __init__.py             # реэкспорт API
 └── core/                   # реализация пакета (yt-dlp, ссылки, cookies)
     ├── __init__.py
@@ -39,7 +41,10 @@ python -m bot.main
 1. New Project → Deploy from GitHub (или пустой репо + `railway up`).
 2. **Root Directory** оставь пустым, если репозиторий = только эта папка; если монорепо — укажи подпапку с этим проектом.
 3. **Variables**: `TELEGRAM_API_KEY` = токен бота.
-4. Сервис подхватит `Dockerfile` и `railway.json`.
+4. **PostgreSQL** (опционально, чтобы считать пользователей): New → Database → PostgreSQL; Railway пробросит `DATABASE_URL` в переменные сервиса с ботом. Для `/stats` укажи `STATS_ADMIN_IDS` = свой Telegram numeric ID (узнать у @userinfobot).
+5. Сервис подхватит `Dockerfile` и `railway.json`.
+
+Локально без Postgres бот работает как раньше; без `DATABASE_URL` учёт отключён.
 
 ## Использование как библиотеки (в другом коде)
 

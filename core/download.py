@@ -14,8 +14,18 @@ from .cookies import apply_ytdlp_cookiefile
 from .exceptions import SocialVideoError, SocialVideoTooLargeError
 from .models import ShortVideoDownload
 from .tiktok_expand import TIKTOK_UA, expand_tiktok_short_url
+from .urls import normalize_instagram_url
 
 logger = logging.getLogger(__name__)
+
+# Публичный Reels иногда отдаётся стабильнее, чем дефолтный python-requests UA
+INSTAGRAM_HTTP_HEADERS = {
+    "User-Agent": (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+        "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+    ),
+    "Accept-Language": "en-US,en;q=0.9",
+}
 
 
 def _extract_uploader(info: dict[str, Any]) -> str:
@@ -38,6 +48,9 @@ def _read_video_duration(file_path: Path) -> int:
 def _download_merged_mp4_sync(url: str, work_dir: Path) -> ShortVideoDownload:
     if "tiktok.com" in url.lower():
         url = expand_tiktok_short_url(url)
+    low = url.lower()
+    if "instagram.com" in low or "instagr.am" in low:
+        url = normalize_instagram_url(url)
 
     out_template = str(work_dir / "%(title).200B.%(ext)s")
     opts: dict[str, Any] = {
@@ -53,8 +66,11 @@ def _download_merged_mp4_sync(url: str, work_dir: Path) -> ShortVideoDownload:
         "restrictfilenames": True,
     }
     apply_ytdlp_cookiefile(opts)
-    if "tiktok.com" in url.lower():
+    low = url.lower()
+    if "tiktok.com" in low:
         opts["http_headers"] = {"User-Agent": TIKTOK_UA}
+    elif "instagram.com" in low or "instagr.am" in low:
+        opts["http_headers"] = INSTAGRAM_HTTP_HEADERS
 
     with YoutubeDL(opts) as ydl:
         try:
