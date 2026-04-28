@@ -19,6 +19,8 @@ class ShortVideoDownload:
     actual_duration: int
     thumbnail_url: str | None
     webpage_url: str
+    width: int | None = None
+    height: int | None = None
 
     def cleanup(self) -> None:
         """Удаляет весь рабочий каталог скачивания (мусор от yt-dlp, не только mp4)."""

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 import re
-from typing import FrozenSet
+from typing import Any, FrozenSet
 
 from aiogram import F, Router
 from aiogram.enums import ChatAction
@@ -134,13 +134,17 @@ def build_router(
             else:
                 credit = ""
             caption = f"{hbold(clip.title)}\n{clip.artist}{credit}"
-            await message.answer_video(
-                video=FSInputFile(clip.file_path, filename=f"{safe}{vext}"),
-                caption=caption,
-                duration=clip.actual_duration or clip.duration or None,
-                supports_streaming=True,
-                reply_markup=kb,
-            )
+            send_kw: dict[str, Any] = {
+                "video": FSInputFile(clip.file_path, filename=f"{safe}{vext}"),
+                "caption": caption,
+                "duration": clip.actual_duration or clip.duration or None,
+                "supports_streaming": True,
+                "reply_markup": kb,
+            }
+            if clip.width is not None and clip.height is not None:
+                send_kw["width"] = clip.width
+                send_kw["height"] = clip.height
+            await message.answer_video(**send_kw)
             try:
                 await status.delete()
             except Exception:

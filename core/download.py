@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import os
 import shutil
@@ -19,6 +20,61 @@ from .tiktok_expand import TIKTOK_UA, expand_tiktok_short_url
 from .urls import normalize_instagram_url
 
 logger = logging.getLogger(__name__)
+
+
+def _probe_video_display_size(path: Path) -> tuple[int | None, int | None]:
+    """Ширина/высота для UI (с учётом тега rotate, как на телефонах). Для sendVideo / iOS."""
+
+    try:
+        out = subprocess.run(
+            [
+                "ffprobe",
+                "-v",
+                "error",
+                "-select_streams",
+                "v:0",
+                "-show_streams",
+                "-of",
+                "json",
+                str(path),
+            ],
+            capture_output=True,
+            text=True,
+            check=True,
+            timeout=60,
+        )
+        data = json.loads(out.stdout)
+        streams = data.get("streams") or []
+        if not streams:
+            return None, None
+        st = streams[0]
+        w = int(st["width"])
+        h = int(st["height"])
+        rot = 0
+        for sd in st.get("side_data_list") or []:
+            r = sd.get("rotation")
+            if r is not None:
+                rot = int(r)
+                break
+        else:
+            tags = st.get("tags") or {}
+            tr = tags.get("rotate")
+            if tr is not None:
+                try:
+                    rot = int(str(tr).strip())
+                except ValueError:
+                    rot = 0
+        # Ориентация показа: если поворот на 90°, в размерах строки местами
+        rn = rot % 360
+        if rn < 0:
+            rn += 360
+        if rn in (90, 270):
+            w, h = h, w
+        return (w, h)
+    except Exception:
+        logger.warning("ffprobe width/height failed for %s", path, exc_info=True)
+        return (None, None)
+
 
 # Публичный Reels иногда отдаётся стабильнее, чем дефолтный python-requests UA
 INSTAGRAM_HTTP_HEADERS = {
@@ -103,11 +159,9 @@ def _ffmpeg_ios_encode_cmd(src: Path, dst: Path) -> list[str]:
         "+genpts",
         "-i",
         str(src),
-        "-vsync",
-        "cfr",
         "-vf",
-        # Сохраняем соотношение сторон: обе «-2» = подобрать размер под чётные стороны без растягивания
-        "scale=-2:-2:flags=bilinear,format=yuv420p",
+        # Явные квадратные пиксели; размеры для клиента — ffprobe + width/height в sendVideo (важно для iOS)
+        r"scale=-2:-2:flags=bilinear,format=yuv420p,setsar=1",
         "-c:v",
         "libx264",
         "-preset",
@@ -249,6 +303,8 @@ def _download_merged_mp4_sync(url: str, work_dir: Path) -> ShortVideoDownload:
     if actual <= 0 and file_path.suffix.lower() == ".webm":
         actual = claimed
 
+    vw, vh = _probe_video_display_size(file_path)
+
     return ShortVideoDownload(
         file_path=file_path,
         title=title[:200],
@@ -257,6 +313,8 @@ def _download_merged_mp4_sync(url: str, work_dir: Path) -> ShortVideoDownload:
         actual_duration=actual,
         thumbnail_url=info.get("thumbnail"),
         webpage_url=str(info.get("webpage_url") or url),
+        width=vw,
+        height=vh,
     )
 
 
