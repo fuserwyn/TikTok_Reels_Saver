@@ -40,6 +40,11 @@ python -m bot.main
 1. New Project → Deploy from GitHub (или пустой репо + `railway up`).
 2. **Root Directory** оставь пустым, если репозиторий = только эта папка; если монорепо — укажи подпапку с этим проектом.
 3. **Variables**: `TELEGRAM_API_KEY` = токен бота.
+   - Для Reels/TikTok на IP хостинга часто нужен `cookies.txt` (формат Netscape):
+     1) добавь файл в volume/диск (например `/data/cookies.txt`);
+     2) укажи переменную `YT_DLP_COOKIEFILE=/data/cookies.txt`.
+   - Можно включить автообновление `yt-dlp` в рантайме: `YT_DLP_AUTOUPDATE_HOURS=24` (раз в сутки).
+   - После апдейтов Instagram пересобирай сервис, чтобы подтянуть свежий `yt-dlp`.
 4. **PostgreSQL** (опционально, чтобы считать пользователей): New → Database → PostgreSQL; Railway пробросит `DATABASE_URL` в переменные сервиса с ботом. Для `/stats` укажи `STATS_ADMIN_IDS` = свой Telegram numeric ID (узнать у @userinfobot). Если при старте `CERTIFICATE_VERIFY_FAILED` — добавь переменную **`DATABASE_SSL=no-verify`**.
 5. Сервис подхватит `Dockerfile` и `railway.json`.
 

@@ -33,3 +33,15 @@ def load_stats_admin_ids() -> FrozenSet[int]:
         if part.isdigit():
             ids.add(int(part))
     return frozenset(ids)
+
+
+def load_ytdlp_autoupdate_hours() -> float:
+    """Интервал автообновления yt-dlp в часах (0 = выключено)."""
+    raw = (os.getenv("YT_DLP_AUTOUPDATE_HOURS") or "").strip()
+    if not raw:
+        return 0.0
+    try:
+        value = float(raw)
+    except ValueError:
+        return 0.0
+    return value if value > 0 else 0.0
