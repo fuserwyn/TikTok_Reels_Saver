@@ -8,11 +8,16 @@ import sys
 from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
+from telethon import TelegramClient
+from telethon.sessions import StringSession
 
 from bot.config import (
+    TELEGRAM_BOT_VIDEO_MAX_BYTES,
     load_database_url,
+    load_mtproto_app_credentials,
     load_settings,
     load_stats_admin_ids,
+    load_telethon_session_string,
     load_ytdlp_autoupdate_hours,
 )
 from bot.db import create_pool, init_schema
@@ -61,6 +66,43 @@ async def run() -> None:
     ytdlp_autoupdate_hours = load_ytdlp_autoupdate_hours()
     pool = None
     updater_task: asyncio.Task[None] | None = None
+    user_client: TelegramClient | None = None
+
+    mt = load_mtproto_app_credentials()
+    session_str = load_telethon_session_string()
+    if mt and session_str:
+        api_id, api_hash = mt
+        try:
+            user_client = TelegramClient(StringSession(session_str), api_id, api_hash)
+            await user_client.connect()
+            if await user_client.is_user_authorized():
+                user_me = await user_client.get_me()
+                log.info(
+                    "Telethon user id %s — отправка видео >50 МБ от пользователя.",
+                    user_me.id,
+                )
+                if max_bytes <= TELEGRAM_BOT_VIDEO_MAX_BYTES:
+                    log.warning(
+                        "TELEGRAM_SESSION задан, но MAX_UPLOAD_BYTES ≤ 50 МБ — "
+                        "увеличь MAX_UPLOAD_BYTES (например 2097152000) для крупных роликов.",
+                    )
+            else:
+                log.error("TELEGRAM_SESSION недействителен — большие файлы отключены.")
+                await user_client.disconnect()
+                user_client = None
+        except Exception:
+            log.exception("Telethon: не удалось подключиться.")
+            if user_client is not None:
+                try:
+                    await user_client.disconnect()
+                except Exception:
+                    pass
+                user_client = None
+    elif session_str and not mt:
+        log.warning(
+            "TELEGRAM_SESSION задан без API_ID/API_HASH — большие файлы отключены.",
+        )
+
     if database_url:
         pool = await create_pool(database_url)
         await init_schema(pool)
@@ -74,7 +116,7 @@ async def run() -> None:
         default=DefaultBotProperties(parse_mode=ParseMode.HTML),
     )
     dp = Dispatcher()
-    dp.include_router(build_router(max_bytes, pool, stats_admins))
+    dp.include_router(build_router(max_bytes, pool, stats_admins, user_client))
 
     me = await bot.get_me()
     log.info("Bot @%s started.", me.username)
@@ -93,6 +135,8 @@ async def run() -> None:
             except asyncio.CancelledError:
                 pass
         await bot.session.close()
+        if user_client is not None:
+            await user_client.disconnect()
         if pool is not None:
             await pool.close()
             log.info("PostgreSQL pool closed.")

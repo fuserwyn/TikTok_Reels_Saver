@@ -1,19 +1,3 @@
-"""Публичный API: реализация в подпакете `core`."""
+"""Обратная совместимость: публичный API в `social_video_fetch`."""
 
-from .core import (
-    ShortVideoDownload,
-    SocialVideoError,
-    SocialVideoTooLargeError,
-    download_social_video,
-    find_instagram_reel_url,
-    find_tiktok_url,
-)
-
-__all__ = [
-    "ShortVideoDownload",
-    "SocialVideoError",
-    "SocialVideoTooLargeError",
-    "download_social_video",
-    "find_instagram_reel_url",
-    "find_tiktok_url",
-]
+from social_video_fetch import *  # noqa: F403

@@ -17,7 +17,7 @@ RUN pip install -r requirements.txt \
  && pip install --upgrade yt-dlp
 
 # Контекст сборки = корень этого мини-проекта (рядом с Dockerfile)
-COPY __init__.py ./social_video_fetch/__init__.py
+COPY social_video_fetch/__init__.py ./social_video_fetch/__init__.py
 COPY core ./social_video_fetch/core
 COPY bot ./bot
 

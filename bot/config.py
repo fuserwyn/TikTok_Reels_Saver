@@ -7,6 +7,27 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+# Лимит sendVideo у Telegram Bot API (≈50 МБ).
+TELEGRAM_BOT_VIDEO_MAX_BYTES = 50 * 1024 * 1024
+
+
+def load_mtproto_app_credentials() -> tuple[int, str] | None:
+    """API_ID + API_HASH с my.telegram.org — нужны для Telethon (отправка >50 МБ)."""
+
+    raw_id = (os.getenv("API_ID") or os.getenv("TELEGRAM_API_ID") or "").strip()
+    api_hash = (os.getenv("API_HASH") or os.getenv("TELEGRAM_API_HASH") or "").strip()
+    if not raw_id or not api_hash:
+        return None
+    try:
+        return int(raw_id), api_hash
+    except ValueError:
+        return None
+
+
+def load_telethon_session_string() -> str | None:
+    s = (os.getenv("TELEGRAM_SESSION") or "").strip()
+    return s or None
+
 
 def load_settings() -> tuple[str, int]:
     token = (os.getenv("TELEGRAM_API_KEY") or os.getenv("BOT_TOKEN") or "").strip()

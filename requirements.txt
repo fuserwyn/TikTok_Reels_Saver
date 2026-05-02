@@ -1,5 +1,6 @@
 aiogram==3.13.1
 asyncpg==0.30.0
+telethon>=1.36.0,<2
 yt-dlp>=2026.3.17
 python-dotenv==1.0.1
 mutagen==1.47.0

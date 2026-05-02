@@ -9,10 +9,14 @@ from aiogram.enums import ChatAction
 from aiogram.filters import Command, CommandStart
 from aiogram.types import FSInputFile, InlineKeyboardButton, InlineKeyboardMarkup, Message
 from aiogram.utils.markdown import hbold
+from telethon import TelegramClient
+from telethon.errors import RPCError
 
 import asyncpg
 
+from bot.config import TELEGRAM_BOT_VIDEO_MAX_BYTES
 from bot.db import fetch_user_stats, increment_download_request
+from bot.telethon_upload import send_large_video_as_user
 from social_video_fetch import (
     SocialVideoError,
     SocialVideoTooLargeError,
@@ -35,9 +39,8 @@ def _user_text_for_social_error(exc: SocialVideoError) -> str:
     if "instagram" in s or "reel" in s:
         return (
             "Не вышло скачать с Reels. Обнови образ (свежий yt-dlp) — у Instagram правки "
-            "выходят часто. С IP хостинга (Railway/VPS) часто нужны cookies: Netscape "
-            "cookies.txt и YT_DLP_COOKIEFILE (wiki yt-dlp). Или открой ролик в браузере "
-            "без входа — если там не идёт, и с бота не выйдет."
+            "выходят часто. С IP хостинга часто нужны cookies и YT_DLP_COOKIEFILE. "
+            "Или открой ролик в браузере без входа — если там не идёт, бот не скачает."
         )
     return (
         "Не вышлось скачать. Попробуй другую ссылку, обнови yt-dlp в контейнере "
@@ -49,6 +52,7 @@ def build_router(
     max_upload_bytes: int,
     pool: asyncpg.Pool | None,
     stats_admin_ids: FrozenSet[int],
+    user_client: TelegramClient | None = None,
 ) -> Router:
     router = Router(name="social_video_bot")
 
@@ -99,8 +103,9 @@ def build_router(
             clip = await download_social_video(url, max_upload_bytes)
         except SocialVideoTooLargeError as exc:
             await status.edit_text(
-                f"Файл ~{exc.size_bytes / 1024 / 1024:.1f} МБ — больше лимита Telegram "
-                f"({exc.limit_bytes // 1024 // 1024} МБ)."
+                f"Файл ~{exc.size_bytes / 1024 / 1024:.1f} МБ — больше лимита скачивания "
+                f"({exc.limit_bytes // 1024 // 1024} МБ). Увеличь MAX_UPLOAD_BYTES и при необходимости "
+                f"настрой API_ID, API_HASH и TELEGRAM_SESSION для отправки >50 МБ."
             )
             return
         except SocialVideoError as exc:
@@ -135,17 +140,45 @@ def build_router(
             else:
                 credit = ""
             caption = f"{hbold(clip.title)}\n{clip.artist}{credit}"
-            send_kw: dict[str, Any] = {
-                "video": FSInputFile(clip.file_path, filename=f"{safe}{vext}"),
-                "caption": caption,
-                "duration": clip.actual_duration or clip.duration or None,
-                "supports_streaming": True,
-                "reply_markup": kb,
-            }
-            if clip.width is not None and clip.height is not None:
-                send_kw["width"] = clip.width
-                send_kw["height"] = clip.height
-            await message.answer_video(**send_kw)
+            file_size = clip.file_path.stat().st_size
+
+            if file_size <= TELEGRAM_BOT_VIDEO_MAX_BYTES:
+                send_kw: dict[str, Any] = {
+                    "video": FSInputFile(clip.file_path, filename=f"{safe}{vext}"),
+                    "caption": caption,
+                    "duration": clip.actual_duration or clip.duration or None,
+                    "supports_streaming": True,
+                    "reply_markup": kb,
+                }
+                if clip.width is not None and clip.height is not None:
+                    send_kw["width"] = clip.width
+                    send_kw["height"] = clip.height
+                await message.answer_video(**send_kw)
+            elif user_client is not None:
+                try:
+                    await send_large_video_as_user(
+                        user_client,
+                        message.chat.id,
+                        clip,
+                        caption,
+                        open_label,
+                        open_url,
+                    )
+                except RPCError:
+                    logger.exception("telethon send failed (RPC)")
+                    await status.edit_text(
+                        "Скачал большое видео, но не удалось отправить через личный аккаунт (Telegram). "
+                        "Часто мешают настройки приватности — напиши аккаунту сессии в личку или попробуй позже."
+                    )
+                    return
+            else:
+                await status.edit_text(
+                    f"Файл ~{file_size / 1024 / 1024:.1f} МБ — больше лимита бота (50 МБ). "
+                    "Для больших видео задай в Railway: API_ID, API_HASH, TELEGRAM_SESSION (string session) "
+                    "и увеличь MAX_UPLOAD_BYTES (например 2097152000). См. .env.example."
+                )
+                return
+
             try:
                 await status.delete()
             except Exception:
