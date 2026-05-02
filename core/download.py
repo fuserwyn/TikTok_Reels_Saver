@@ -254,6 +254,16 @@ def _download_merged_mp4_sync(url: str, work_dir: Path) -> ShortVideoDownload:
         "restrictfilenames": True,
     }
     apply_ytdlp_cookiefile(opts)
+    cf = opts.get("cookiefile")
+    if cf:
+        src = Path(cf)
+        if src.is_file():
+            dst = work_dir / "ytdlp_cookies.txt"
+            try:
+                shutil.copy2(src, dst)
+                opts["cookiefile"] = str(dst)
+            except OSError:
+                logger.warning("could not copy cookiefile into work_dir", exc_info=True)
     low = url.lower()
     if "tiktok.com" in low:
         opts["http_headers"] = {"User-Agent": TIKTOK_UA}
