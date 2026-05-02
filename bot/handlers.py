@@ -13,7 +13,7 @@ from pyrogram.enums import ChatAction
 from pyrogram.errors import RPCError
 from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup, Message
 
-from bot.config import TELEGRAM_BOT_VIDEO_MAX_BYTES
+from bot.config import TELEGRAM_BOT_VIDEO_MAX_BYTES, max_download_bytes_for_pipeline
 from bot.db import fetch_user_stats, increment_download_request
 from bot.pyrogram_upload import send_large_video_as_user
 from social_video_fetch import (
@@ -102,13 +102,13 @@ def register_handlers(bot: Client, ctx: HandlerContext) -> None:
         status = await message.reply_text("Качаю…")
         await client.send_chat_action(message.chat.id, ChatAction.UPLOAD_VIDEO)
         try:
-            clip = await download_social_video(url, ctx.max_upload_bytes)
+            download_cap = max_download_bytes_for_pipeline(ctx.max_upload_bytes)
+            clip = await download_social_video(url, download_cap)
         except SocialVideoTooLargeError as exc:
             await status.edit_text(
                 f"Файл ~{exc.size_bytes / 1024 / 1024:.1f} МБ — больше лимита скачивания "
-                f"({exc.limit_bytes // 1024 // 1024} МБ). Если в Railway задан MAX_UPLOAD_BYTES=52428800, "
-                "убери переменную (при живой сессии пользователя Pyrogram лимит поднимется сам) или задай больший; "
-                "без TELEGRAM_SESSION качаем не больше ~50 МБ."
+                f"({exc.limit_bytes // 1024 // 1024} МБ). Увеличь MAX_DOWNLOAD_BYTES в Railway "
+                "(или MAX_UPLOAD_BYTES), если нужны очень крупные исходники."
             )
             return
         except SocialVideoError as exc:

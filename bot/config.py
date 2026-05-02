@@ -10,6 +10,17 @@ load_dotenv()
 # Лимит sendVideo у Telegram Bot API (≈50 МБ).
 TELEGRAM_BOT_VIDEO_MAX_BYTES = 50 * 1024 * 1024
 
+# Скачивание с сервера (TikTok/Reels) до этого размера; дальше сжимаем под TELEGRAM_BOT_VIDEO_MAX_BYTES.
+_DEFAULT_MAX_DOWNLOAD_BEFORE_COMPRESS = 450 * 1024 * 1024
+
+
+def max_download_bytes_for_pipeline(max_upload_from_settings: int) -> int:
+    """Лимит байт для yt-dlp: не ниже настроек и не ниже потолка перед сжатием (иначе крупные ролики не доходят до ffmpeg)."""
+
+    raw = (os.getenv("MAX_DOWNLOAD_BYTES") or "").strip()
+    floor = int(raw) if raw else _DEFAULT_MAX_DOWNLOAD_BEFORE_COMPRESS
+    return max(max_upload_from_settings, floor)
+
 
 def load_mtproto_app_credentials() -> tuple[int, str] | None:
     """API_ID + API_HASH с my.telegram.org — нужны для Pyrogram (бот и при необходимости user session)."""
