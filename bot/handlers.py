@@ -147,7 +147,7 @@ def register_handlers(bot: Client, ctx: HandlerContext) -> None:
             caption = f"<b>{cap_title}</b>\n{cap_artist}{credit}"
             file_size = clip.file_path.stat().st_size
             if file_size > TELEGRAM_BOT_VIDEO_MAX_BYTES:
-                await status.edit_text("Сжимаю под лимит Telegram (~50 МБ)…")
+                await status.edit_text("Ожидайте…")
                 await client.send_chat_action(message.chat.id, ChatAction.UPLOAD_VIDEO)
                 await asyncio.to_thread(
                     compress_clip_to_max_bytes,
