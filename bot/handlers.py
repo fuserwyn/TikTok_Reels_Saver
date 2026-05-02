@@ -150,14 +150,15 @@ def register_handlers(bot: Client, ctx: HandlerContext) -> None:
                     "video": str(clip.file_path),
                     "file_name": f"{safe}{vext}",
                     "caption": caption,
-                    "duration": clip.actual_duration or clip.duration or None,
+                    "duration": clip.actual_duration or clip.duration or 0,
                     "supports_streaming": True,
                     "reply_markup": kb,
+                    "reply_to_message_id": message.id,
                 }
                 if clip.width is not None and clip.height is not None:
                     send_kw["width"] = clip.width
                     send_kw["height"] = clip.height
-                await message.reply_video(**send_kw)
+                await client.send_video(message.chat.id, **send_kw)
             elif ctx.user_client is not None:
                 try:
                     await send_large_video_as_user(
@@ -167,6 +168,7 @@ def register_handlers(bot: Client, ctx: HandlerContext) -> None:
                         caption,
                         open_label,
                         open_url,
+                        file_name=f"{safe}{vext}",
                     )
                 except RPCError:
                     logger.exception("pyrogram user send failed (RPC)")

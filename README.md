@@ -12,7 +12,7 @@
 ├── railway.json
 ├── requirements.txt
 ├── .env.example
-├── bot/
+├── bot/                   # Pyrogram (как WAV-бот: bot_token + api_id + api_hash)
 │   ├── main.py
 │   ├── config.py
 │   ├── handlers.py
@@ -39,7 +39,7 @@ python -m bot.main
 
 1. New Project → Deploy from GitHub (или пустой репо + `railway up`).
 2. **Root Directory** оставь пустым, если репозиторий = только эта папка; если монорепо — укажи подпапку с этим проектом.
-3. **Variables**: `TELEGRAM_API_KEY` = токен бота.
+3. **Variables**: `TELEGRAM_API_KEY` или `BOT_TOKEN`; **`API_ID` и `API_HASH`** (my.telegram.org) — обязательны для Pyrogram, как в WAV-боте. Для видео >50 МБ: `TELEGRAM_SESSION` (строка Pyrogram, не Telethon).
    - Для Reels/TikTok на IP хостинга часто нужен `cookies.txt` (формат Netscape):
      1) добавь файл в volume/диск (например `/data/cookies.txt`);
      2) укажи переменную `YT_DLP_COOKIEFILE=/data/cookies.txt`.

@@ -16,6 +16,7 @@ async def send_large_video_as_user(
     caption: str,
     open_label: str,
     open_url: str,
+    file_name: str | None = None,
 ) -> None:
     path = clip.file_path
     size = path.stat().st_size if path.is_file() else 0
@@ -35,5 +36,8 @@ async def send_large_video_as_user(
     if clip.width is not None and clip.height is not None:
         kwargs["width"] = clip.width
         kwargs["height"] = clip.height
+
+    if file_name:
+        kwargs["file_name"] = file_name
 
     await client.send_video(chat_id, video=str(path), **kwargs)
