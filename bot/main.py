@@ -5,11 +5,8 @@ import logging
 import subprocess
 import sys
 
-from aiogram import Bot, Dispatcher
-from aiogram.client.default import DefaultBotProperties
-from aiogram.enums import ParseMode
-from telethon import TelegramClient
-from telethon.sessions import StringSession
+from pyrogram import Client, idle
+from pyrogram.enums import ParseMode
 
 from bot.config import (
     TELEGRAM_BOT_VIDEO_MAX_BYTES,
@@ -17,12 +14,12 @@ from bot.config import (
     load_mtproto_app_credentials,
     load_settings,
     load_stats_admin_ids,
-    load_telethon_session_string,
+    load_user_session_string,
     load_ytdlp_autoupdate_hours,
 )
 from bot.db import create_pool, init_schema
-from bot.handlers import build_router
-from bot.telethon_upload import TELEGRAM_USER_VIDEO_MAX_BYTES
+from bot.handlers import HandlerContext, register_handlers
+from bot.pyrogram_upload import TELEGRAM_USER_VIDEO_MAX_BYTES
 
 
 def _configure_logging() -> None:
@@ -62,56 +59,60 @@ async def run() -> None:
     log = logging.getLogger("social_video_bot")
 
     token, max_bytes, max_upload_explicit = load_settings()
+    mt = load_mtproto_app_credentials()
+    if not mt:
+        raise RuntimeError(
+            "Задай API_ID и API_HASH (my.telegram.org) — Pyrogram-боту они нужны всегда, как в WAV-проекте.",
+        )
+    api_id, api_hash = mt
+
     database_url = load_database_url()
     stats_admins = load_stats_admin_ids()
     ytdlp_autoupdate_hours = load_ytdlp_autoupdate_hours()
     pool = None
     updater_task: asyncio.Task[None] | None = None
-    user_client: TelegramClient | None = None
+    user_client: Client | None = None
 
-    mt = load_mtproto_app_credentials()
-    session_str = load_telethon_session_string()
-    if mt and session_str:
-        api_id, api_hash = mt
+    session_str = load_user_session_string()
+    if session_str:
+        uc = Client(
+            "large_video_user",
+            api_id=api_id,
+            api_hash=api_hash,
+            session_string=session_str,
+            in_memory=True,
+        )
         try:
-            user_client = TelegramClient(StringSession(session_str), api_id, api_hash)
-            await user_client.connect()
-            if await user_client.is_user_authorized():
-                user_me = await user_client.get_me()
+            await uc.start()
+            ume = await uc.get_me()
+            if ume is not None:
                 log.info(
-                    "Telethon user id %s — отправка видео >50 МБ от пользователя.",
-                    user_me.id,
+                    "Pyrogram user id %s — видео >50 МБ уходят от этого аккаунта.",
+                    ume.id,
                 )
-                if (
-                    not max_upload_explicit
-                    and max_bytes <= TELEGRAM_BOT_VIDEO_MAX_BYTES
-                ):
+                user_client = uc
+                if not max_upload_explicit and max_bytes <= TELEGRAM_BOT_VIDEO_MAX_BYTES:
                     max_bytes = TELEGRAM_USER_VIDEO_MAX_BYTES
                     log.info(
-                        "Лимит скачивания — до %s МБ (сессия Telethon; MAX_UPLOAD_BYTES не задан).",
+                        "Лимит скачивания — до %s МБ (TELEGRAM_SESSION; MAX_UPLOAD_BYTES не задан).",
                         max_bytes // (1024 * 1024),
                     )
                 elif max_upload_explicit and max_bytes <= TELEGRAM_BOT_VIDEO_MAX_BYTES:
                     log.warning(
-                        "MAX_UPLOAD_BYTES ≤ 50 МБ при работающей сессии Telethon — "
+                        "MAX_UPLOAD_BYTES ≤ 50 МБ при работающей пользовательской сессии — "
                         "ролики крупнее не скачаются; убери переменную или подними лимит.",
                     )
             else:
-                log.error("TELEGRAM_SESSION недействителен — большие файлы отключены.")
-                await user_client.disconnect()
-                user_client = None
+                await uc.stop()
         except Exception:
-            log.exception("Telethon: не удалось подключиться.")
-            if user_client is not None:
-                try:
-                    await user_client.disconnect()
-                except Exception:
-                    pass
-                user_client = None
-    elif session_str and not mt:
-        log.warning(
-            "TELEGRAM_SESSION задан без API_ID/API_HASH — большие файлы отключены.",
-        )
+            log.exception("Pyrogram: пользовательская сессия не подошла.")
+            try:
+                await uc.stop()
+            except Exception:
+                pass
+            user_client = None
+    else:
+        log.debug("TELEGRAM_SESSION не задан — только видео до ~50 МБ от бота.")
 
     if database_url:
         pool = await create_pool(database_url)
@@ -121,22 +122,32 @@ async def run() -> None:
             "DATABASE_URL не задан — учёт пользователей в PostgreSQL отключён.",
         )
 
-    bot = Bot(
-        token=token,
-        default=DefaultBotProperties(parse_mode=ParseMode.HTML),
+    bot = Client(
+        "social_video_bot",
+        api_id=api_id,
+        api_hash=api_hash,
+        bot_token=token,
+        in_memory=True,
+        parse_mode=ParseMode.HTML,
     )
-    dp = Dispatcher()
-    dp.include_router(build_router(max_bytes, pool, stats_admins, user_client))
+    ctx = HandlerContext(
+        max_upload_bytes=max_bytes,
+        pool=pool,
+        stats_admin_ids=stats_admins,
+        user_client=user_client,
+    )
+    register_handlers(bot, ctx)
 
-    me = await bot.get_me()
-    log.info("Bot @%s started.", me.username)
     if ytdlp_autoupdate_hours > 0:
         updater_task = asyncio.create_task(_ytdlp_autoupdate_loop(ytdlp_autoupdate_hours))
         log.info("yt-dlp auto-update enabled: every %.2f hours.", ytdlp_autoupdate_hours)
 
     try:
-        await bot.delete_webhook(drop_pending_updates=True)
-        await dp.start_polling(bot)
+        async with bot:
+            me = await bot.get_me()
+            uname = me.username if me else None
+            log.info("Bot @%s started.", uname or (me.id if me else "?"))
+            await idle()
     finally:
         if updater_task is not None:
             updater_task.cancel()
@@ -144,9 +155,11 @@ async def run() -> None:
                 await updater_task
             except asyncio.CancelledError:
                 pass
-        await bot.session.close()
         if user_client is not None:
-            await user_client.disconnect()
+            try:
+                await user_client.stop()
+            except Exception:
+                log.exception("Ошибка при остановке пользовательского клиента.")
         if pool is not None:
             await pool.close()
             log.info("PostgreSQL pool closed.")

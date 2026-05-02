@@ -12,7 +12,7 @@ TELEGRAM_BOT_VIDEO_MAX_BYTES = 50 * 1024 * 1024
 
 
 def load_mtproto_app_credentials() -> tuple[int, str] | None:
-    """API_ID + API_HASH с my.telegram.org — нужны для Telethon (отправка >50 МБ)."""
+    """API_ID + API_HASH с my.telegram.org — нужны для Pyrogram (бот и при необходимости user session)."""
 
     raw_id = (os.getenv("API_ID") or os.getenv("TELEGRAM_API_ID") or "").strip()
     api_hash = (os.getenv("API_HASH") or os.getenv("TELEGRAM_API_HASH") or "").strip()
@@ -24,7 +24,9 @@ def load_mtproto_app_credentials() -> tuple[int, str] | None:
         return None
 
 
-def load_telethon_session_string() -> str | None:
+def load_user_session_string() -> str | None:
+    """Строка сессии Pyrogram (не формат Telethon)."""
+
     s = (os.getenv("TELEGRAM_SESSION") or "").strip()
     return s or None
 

@@ -1,7 +1,8 @@
 from __future__ import annotations
 
-from telethon import TelegramClient
-from telethon.tl.custom import Button
+from pyrogram import Client
+from pyrogram.enums import ParseMode
+from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
 from social_video_fetch import ShortVideoDownload
 
@@ -9,7 +10,7 @@ TELEGRAM_USER_VIDEO_MAX_BYTES = 2 * 1024 * 1024 * 1024
 
 
 async def send_large_video_as_user(
-    client: TelegramClient,
+    client: Client,
     chat_id: int,
     clip: ShortVideoDownload,
     caption: str,
@@ -21,16 +22,18 @@ async def send_large_video_as_user(
     if size > TELEGRAM_USER_VIDEO_MAX_BYTES:
         raise OSError(f"Файл слишком большой для Telegram ({size} байт).")
 
-    buttons = [[Button.url(open_label, open_url)]]
+    kb = InlineKeyboardMarkup([[InlineKeyboardButton(open_label, url=open_url)]])
     duration = clip.actual_duration or clip.duration or None
     kwargs: dict = {
         "caption": caption[:1024],
-        "parse_mode": "html",
+        "parse_mode": ParseMode.HTML,
         "supports_streaming": True,
-        "video": True,
-        "buttons": buttons,
+        "reply_markup": kb,
     }
     if duration is not None and duration > 0:
         kwargs["duration"] = int(duration)
+    if clip.width is not None and clip.height is not None:
+        kwargs["width"] = clip.width
+        kwargs["height"] = clip.height
 
-    await client.send_file(chat_id, path, **kwargs)
+    await client.send_video(chat_id, video=str(path), **kwargs)
