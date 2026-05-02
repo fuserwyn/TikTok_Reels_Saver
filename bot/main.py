@@ -22,6 +22,7 @@ from bot.config import (
 )
 from bot.db import create_pool, init_schema
 from bot.handlers import build_router
+from bot.telethon_upload import TELEGRAM_USER_VIDEO_MAX_BYTES
 
 
 def _configure_logging() -> None:
@@ -60,7 +61,7 @@ async def run() -> None:
     _configure_logging()
     log = logging.getLogger("social_video_bot")
 
-    token, max_bytes = load_settings()
+    token, max_bytes, max_upload_explicit = load_settings()
     database_url = load_database_url()
     stats_admins = load_stats_admin_ids()
     ytdlp_autoupdate_hours = load_ytdlp_autoupdate_hours()
@@ -81,10 +82,19 @@ async def run() -> None:
                     "Telethon user id %s — отправка видео >50 МБ от пользователя.",
                     user_me.id,
                 )
-                if max_bytes <= TELEGRAM_BOT_VIDEO_MAX_BYTES:
+                if (
+                    not max_upload_explicit
+                    and max_bytes <= TELEGRAM_BOT_VIDEO_MAX_BYTES
+                ):
+                    max_bytes = TELEGRAM_USER_VIDEO_MAX_BYTES
+                    log.info(
+                        "Лимит скачивания — до %s МБ (сессия Telethon; MAX_UPLOAD_BYTES не задан).",
+                        max_bytes // (1024 * 1024),
+                    )
+                elif max_upload_explicit and max_bytes <= TELEGRAM_BOT_VIDEO_MAX_BYTES:
                     log.warning(
-                        "TELEGRAM_SESSION задан, но MAX_UPLOAD_BYTES ≤ 50 МБ — "
-                        "увеличь MAX_UPLOAD_BYTES (например 2097152000) для крупных роликов.",
+                        "MAX_UPLOAD_BYTES ≤ 50 МБ при работающей сессии Telethon — "
+                        "ролики крупнее не скачаются; убери переменную или подними лимит.",
                     )
             else:
                 log.error("TELEGRAM_SESSION недействителен — большие файлы отключены.")

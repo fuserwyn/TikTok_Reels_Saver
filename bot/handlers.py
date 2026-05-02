@@ -104,8 +104,9 @@ def build_router(
         except SocialVideoTooLargeError as exc:
             await status.edit_text(
                 f"Файл ~{exc.size_bytes / 1024 / 1024:.1f} МБ — больше лимита скачивания "
-                f"({exc.limit_bytes // 1024 // 1024} МБ). Увеличь MAX_UPLOAD_BYTES и при необходимости "
-                f"настрой API_ID, API_HASH и TELEGRAM_SESSION для отправки >50 МБ."
+                f"({exc.limit_bytes // 1024 // 1024} МБ). Если в Railway задан MAX_UPLOAD_BYTES=52428800, "
+                "убери переменную (при живой Telethon-сессии лимит поднимется сам) или укажи больший лимит; "
+                "без API_ID / API_HASH / TELEGRAM_SESSION качаем не больше ~50 МБ."
             )
             return
         except SocialVideoError as exc:
@@ -174,8 +175,8 @@ def build_router(
             else:
                 await status.edit_text(
                     f"Файл ~{file_size / 1024 / 1024:.1f} МБ — больше лимита бота (50 МБ). "
-                    "Для больших видео задай в Railway: API_ID, API_HASH, TELEGRAM_SESSION (string session) "
-                    "и увеличь MAX_UPLOAD_BYTES (например 2097152000). См. .env.example."
+                    "Для больших видео задай API_ID, API_HASH и TELEGRAM_SESSION; MAX_UPLOAD_BYTES "
+                    "при сессии можно не задавать. См. .env.example."
                 )
                 return
 

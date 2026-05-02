@@ -29,14 +29,18 @@ def load_telethon_session_string() -> str | None:
     return s or None
 
 
-def load_settings() -> tuple[str, int]:
+def load_settings() -> tuple[str, int, bool]:
+    """Токен, лимит скачивания (байты), флаг «MAX_UPLOAD_BYTES задан в .env явно»."""
+
     token = (os.getenv("TELEGRAM_API_KEY") or os.getenv("BOT_TOKEN") or "").strip()
     if not token:
         raise RuntimeError(
             "Задай TELEGRAM_API_KEY или BOT_TOKEN в переменных окружения (Railway Variables)."
         )
-    max_bytes = int(os.getenv("MAX_UPLOAD_BYTES", str(50 * 1024 * 1024)))
-    return token, max_bytes
+    raw = os.getenv("MAX_UPLOAD_BYTES")
+    if raw is None or not str(raw).strip():
+        return token, TELEGRAM_BOT_VIDEO_MAX_BYTES, False
+    return token, int(str(raw).strip()), True
 
 
 def load_database_url() -> str | None:
