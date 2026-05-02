@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import html
 import logging
 import re
@@ -18,6 +19,7 @@ from bot.pyrogram_upload import send_large_video_as_user
 from social_video_fetch import (
     SocialVideoError,
     SocialVideoTooLargeError,
+    compress_clip_to_max_bytes,
     download_social_video,
     find_instagram_reel_url,
     find_tiktok_url,
@@ -144,6 +146,18 @@ def register_handlers(bot: Client, ctx: HandlerContext) -> None:
             cap_artist = html.escape(clip.artist or "")
             caption = f"<b>{cap_title}</b>\n{cap_artist}{credit}"
             file_size = clip.file_path.stat().st_size
+            if file_size > TELEGRAM_BOT_VIDEO_MAX_BYTES:
+                await status.edit_text("Сжимаю под лимит Telegram (~50 МБ)…")
+                await client.send_chat_action(message.chat.id, ChatAction.UPLOAD_VIDEO)
+                await asyncio.to_thread(
+                    compress_clip_to_max_bytes,
+                    clip,
+                    TELEGRAM_BOT_VIDEO_MAX_BYTES,
+                )
+                file_size = clip.file_path.stat().st_size
+                vext = clip.file_path.suffix.lower()
+                if vext not in (".mp4", ".webm"):
+                    vext = ".mp4"
 
             if file_size <= TELEGRAM_BOT_VIDEO_MAX_BYTES:
                 send_kw: dict = {
@@ -179,9 +193,8 @@ def register_handlers(bot: Client, ctx: HandlerContext) -> None:
                     return
             else:
                 await status.edit_text(
-                    f"Файл ~{file_size / 1024 / 1024:.1f} МБ — больше лимита бота (50 МБ). "
-                    "Добавь TELEGRAM_SESSION (строка сессии Pyrogram, не Telethon); "
-                    "MAX_UPLOAD_BYTES при сессии можно не задавать. См. .env.example."
+                    f"Файл ~{file_size / 1024 / 1024:.1f} МБ — перекодированием в ~50 МБ не удалось. "
+                    "Добавь TELEGRAM_SESSION (Pyrogram), чтобы отправить крупный оригинал. См. .env.example."
                 )
                 return
 

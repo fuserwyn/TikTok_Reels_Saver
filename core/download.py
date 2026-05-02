@@ -111,6 +111,187 @@ def _read_video_duration(file_path: Path) -> int:
         return 0
 
 
+def _ffprobe_duration_sec(path: Path) -> float:
+    """Длительность в секундах (по контейнеру)."""
+
+    try:
+        out = subprocess.run(
+            [
+                "ffprobe",
+                "-v",
+                "error",
+                "-show_entries",
+                "format=duration",
+                "-of",
+                "default=noprint_wrappers=1:nokey=1",
+                str(path),
+            ],
+            capture_output=True,
+            text=True,
+            check=True,
+            timeout=120,
+        )
+        return float((out.stdout or "").strip() or 0)
+    except Exception:
+        logger.warning("ffprobe duration failed for %s", path, exc_info=True)
+        return 0.0
+
+
+def _video_kbps_for_target_size(duration_sec: float, max_bytes: int, audio_kbps: int = 128) -> int:
+    """Оценка видеобитрейта (кбит/с) чтобы уложиться в max_bytes за duration_sec."""
+
+    if duration_sec < 0.5:
+        duration_sec = max(float(os.getenv("VIDEO_COMPRESS_MIN_DURATION_SEC", "5") or "5"), 5.0)
+    overhead_kbps = 48
+    budget_kbps = (max_bytes * 8 / 1000) / duration_sec
+    v = int(budget_kbps - audio_kbps - overhead_kbps)
+    return max(64, v)
+
+
+def _ffmpeg_compress_budget(
+    src: Path,
+    dst: Path,
+    video_kbps: int,
+    max_height: int,
+) -> None:
+    vf = (
+        f"scale=-2:{max_height}:force_original_aspect_ratio=decrease,"
+        r"format=yuv420p,setsar=1"
+    )
+    mx = max(video_kbps + 1, int(video_kbps * 1.35))
+    bufsize = max(video_kbps * 2, 200)
+    subprocess.run(
+        [
+            "ffmpeg",
+            "-y",
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-fflags",
+            "+genpts",
+            "-i",
+            str(src),
+            "-vf",
+            vf,
+            "-c:v",
+            "libx264",
+            "-preset",
+            "veryfast",
+            "-b:v",
+            f"{video_kbps}k",
+            "-maxrate",
+            f"{mx}k",
+            "-bufsize",
+            f"{bufsize}k",
+            "-c:a",
+            "aac",
+            "-b:a",
+            "128k",
+            "-ar",
+            "44100",
+            "-movflags",
+            "+faststart",
+            "-avoid_negative_ts",
+            "make_zero",
+            str(dst),
+        ],
+        check=True,
+        timeout=7200,
+    )
+
+
+def compress_clip_to_max_bytes(clip: ShortVideoDownload, max_bytes: int) -> bool:
+    """Перекодировать ролик так, чтобы размер был ≤ max_bytes. Обновляет путь-метаданные clip.
+
+    Возвращает True если после попыток размер укладывается; иначе False (файл может быть исходным).
+    """
+
+    path = clip.file_path
+    if not path.is_file():
+        return False
+    size = path.stat().st_size
+    if size <= max_bytes:
+        return True
+
+    duration = _ffprobe_duration_sec(path) or float(clip.actual_duration or clip.duration or 0)
+    target = int(max_bytes * 0.91)
+    base_kbps = _video_kbps_for_target_size(duration, target)
+
+    max_heights = (1280, 720, 540, 480, 360)
+    squeeze_factors = (1.0, 0.82, 0.65, 0.5, 0.38)
+
+    src_backup = path.with_name(path.stem + "._precompress.bak" + path.suffix)
+    try:
+        shutil.copy2(path, src_backup)
+    except OSError:
+        logger.warning("compress: could not backup source", exc_info=True)
+        return False
+
+    tmp_out = path.with_name(path.stem + "._cmp.mp4")
+    try:
+        for max_h in max_heights:
+            for sq in squeeze_factors:
+                vk = max(64, int(base_kbps * sq))
+                try:
+                    if tmp_out.exists():
+                        tmp_out.unlink()
+                    _ffmpeg_compress_budget(src_backup, tmp_out, vk, max_h)
+                except Exception:
+                    logger.warning(
+                        "compress attempt failed h=%s kbps=%s",
+                        max_h,
+                        vk,
+                        exc_info=True,
+                    )
+                    continue
+                if not tmp_out.is_file():
+                    continue
+                if tmp_out.stat().st_size <= max_bytes:
+                    try:
+                        path.unlink(missing_ok=True)
+                    except OSError:
+                        pass
+                    tmp_out.replace(path)
+                    final_path = path
+                    if final_path.suffix.lower() != ".mp4":
+                        new_p = final_path.with_suffix(".mp4")
+                        final_path.rename(new_p)
+                        final_path = new_p
+                    clip.file_path = final_path
+                    try:
+                        src_backup.unlink(missing_ok=True)
+                    except OSError:
+                        pass
+                    clip.actual_duration = (
+                        _read_video_duration(final_path) or int(duration) or clip.actual_duration
+                    )
+                    w, h = _probe_video_display_size(final_path)
+                    clip.width, clip.height = w, h
+                    logger.info(
+                        "compressed video to %s bytes (target max %s)",
+                        final_path.stat().st_size,
+                        max_bytes,
+                    )
+                    return True
+                logger.debug(
+                    "compress still too big: %s > %s",
+                    tmp_out.stat().st_size,
+                    max_bytes,
+                )
+        return False
+    finally:
+        if tmp_out.exists():
+            try:
+                tmp_out.unlink()
+            except OSError:
+                pass
+        if src_backup.exists():
+            try:
+                src_backup.unlink(missing_ok=True)
+            except OSError:
+                pass
+
+
 def _video_lightweight_only() -> bool:
     """Только remux faststart без перекода — меньше CPU, хуже совместимость с iPhone."""
 
