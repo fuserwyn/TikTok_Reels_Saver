@@ -82,7 +82,7 @@ def register_handlers(bot: Client, ctx: HandlerContext) -> None:
             "Ссылка на TikTok или Reels в этот чат — пришлю видео.",
         )
 
-    @bot.on_message(filters.private & filters.text & ~filters.command())
+    @bot.on_message(filters.private & filters.text & ~filters.regex("^/"))
     async def on_text(client: Client, message: Message) -> None:
         text = message.text or ""
         url = find_tiktok_url(text) or find_instagram_reel_url(text)
