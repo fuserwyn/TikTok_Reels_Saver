@@ -148,6 +148,39 @@ def _video_kbps_for_target_size(duration_sec: float, max_bytes: int, audio_kbps:
     return max(64, v)
 
 
+_X264_PRESETS = {
+    "ultrafast",
+    "superfast",
+    "veryfast",
+    "faster",
+    "fast",
+    "medium",
+    "slow",
+    "slower",
+    "veryslow",
+}
+
+
+def _ffmpeg_preset() -> str:
+    """FFMPEG_PRESET — компромисс CPU↔размер. По умолчанию veryfast (дёшево по CPU)."""
+
+    p = (os.getenv("FFMPEG_PRESET") or "").strip().lower()
+    return p if p in _X264_PRESETS else "veryfast"
+
+
+def _ffmpeg_threads_args() -> list[str]:
+    """FFMPEG_THREADS — потолок потоков ffmpeg; защищает от тротлинга на тарифах с лимитом vCPU."""
+
+    raw = (os.getenv("FFMPEG_THREADS") or "").strip()
+    if not raw:
+        return []
+    try:
+        n = int(raw)
+    except ValueError:
+        return []
+    return ["-threads", str(n)] if n > 0 else []
+
+
 def _ffmpeg_compress_budget(
     src: Path,
     dst: Path,
@@ -173,10 +206,11 @@ def _ffmpeg_compress_budget(
             str(src),
             "-vf",
             vf,
+            *_ffmpeg_threads_args(),
             "-c:v",
             "libx264",
             "-preset",
-            "veryfast",
+            _ffmpeg_preset(),
             "-b:v",
             f"{video_kbps}k",
             "-maxrate",
@@ -222,12 +256,14 @@ def compress_clip_to_max_bytes(clip: ShortVideoDownload, max_bytes: int) -> bool
 
     src_backup = path.with_name(path.stem + "._precompress.bak" + path.suffix)
     try:
-        shutil.copy2(path, src_backup)
+        # Перемещаем оригинал в бэкап (не копируем) — не удваиваем пик на диске.
+        path.rename(src_backup)
     except OSError:
-        logger.warning("compress: could not backup source", exc_info=True)
+        logger.warning("compress: could not move source aside", exc_info=True)
         return False
 
     tmp_out = path.with_name(path.stem + "._cmp.mp4")
+    compressed = False
     try:
         for max_h in max_heights:
             for sq in squeeze_factors:
@@ -247,10 +283,6 @@ def compress_clip_to_max_bytes(clip: ShortVideoDownload, max_bytes: int) -> bool
                 if not tmp_out.is_file():
                     continue
                 if tmp_out.stat().st_size <= max_bytes:
-                    try:
-                        path.unlink(missing_ok=True)
-                    except OSError:
-                        pass
                     tmp_out.replace(path)
                     final_path = path
                     if final_path.suffix.lower() != ".mp4":
@@ -258,10 +290,7 @@ def compress_clip_to_max_bytes(clip: ShortVideoDownload, max_bytes: int) -> bool
                         final_path.rename(new_p)
                         final_path = new_p
                     clip.file_path = final_path
-                    try:
-                        src_backup.unlink(missing_ok=True)
-                    except OSError:
-                        pass
+                    compressed = True
                     clip.actual_duration = (
                         _read_video_duration(final_path) or int(duration) or clip.actual_duration
                     )
@@ -285,9 +314,18 @@ def compress_clip_to_max_bytes(clip: ShortVideoDownload, max_bytes: int) -> bool
                 tmp_out.unlink()
             except OSError:
                 pass
-        if src_backup.exists():
+        if compressed:
             try:
                 src_backup.unlink(missing_ok=True)
+            except OSError:
+                pass
+        elif src_backup.exists():
+            # Сжатие не удалось — возвращаем оригинал на место, чтобы вызывающий код имел файл.
+            try:
+                if not path.exists():
+                    src_backup.replace(path)
+                else:
+                    src_backup.unlink(missing_ok=True)
             except OSError:
                 pass
 
@@ -351,10 +389,11 @@ def _ffmpeg_ios_encode_cmd(src: Path, dst: Path) -> list[str]:
         "-vf",
         # Явные квадратные пиксели; размеры для клиента — ffprobe + width/height в sendVideo (важно для iOS)
         r"scale=-2:-2:flags=bilinear,format=yuv420p,setsar=1",
+        *_ffmpeg_threads_args(),
         "-c:v",
         "libx264",
         "-preset",
-        "veryfast",
+        _ffmpeg_preset(),
         "-crf",
         "23",
         "-profile:v",
@@ -375,10 +414,64 @@ def _ffmpeg_ios_encode_cmd(src: Path, dst: Path) -> list[str]:
     ]
 
 
+# Кодеки, которые iPhone/Telegram играют без перекода (нужен лишь faststart).
+_IOS_READY_VCODECS = {"h264", "avc1"}
+_IOS_READY_PIXFMTS = {"yuv420p", "yuvj420p"}
+
+
+def _probe_codec_pixfmt(path: Path) -> tuple[str | None, str | None]:
+    """codec_name / pix_fmt первого видеопотока (дёшево — без чтения пакетов)."""
+
+    try:
+        out = subprocess.run(
+            [
+                "ffprobe",
+                "-v",
+                "error",
+                "-select_streams",
+                "v:0",
+                "-show_entries",
+                "stream=codec_name,pix_fmt",
+                "-of",
+                "json",
+                str(path),
+            ],
+            capture_output=True,
+            text=True,
+            check=True,
+            timeout=60,
+        )
+        data = json.loads(out.stdout)
+        streams = data.get("streams") or []
+        if not streams:
+            return None, None
+        st = streams[0]
+        return st.get("codec_name"), st.get("pix_fmt")
+    except Exception:
+        logger.warning("ffprobe codec/pix_fmt failed for %s", path, exc_info=True)
+        return None, None
+
+
+def _is_ios_ready_mp4(path: Path) -> bool:
+    """Уже H.264 + yuv420p → полный перекод не нужен, хватит faststart (экономит CPU)."""
+
+    if (os.getenv("VIDEO_FORCE_TRANSCODE") or "").strip().lower() in ("1", "true", "yes", "on"):
+        return False
+    codec, pix_fmt = _probe_codec_pixfmt(path)
+    if codec is None:
+        return False
+    return (codec or "").lower() in _IOS_READY_VCODECS and (pix_fmt or "").lower() in _IOS_READY_PIXFMTS
+
+
 def _transcode_in_place_for_ios_h264(file_path: Path) -> None:
-    """Перекод в H.264+AAC — по умолчанию вкл.; для экономии CPU см. VIDEO_LIGHTWEIGHT."""
+    """Перекод в H.264+AAC только когда нужен; иначе дешёвый faststart. См. VIDEO_LIGHTWEIGHT / VIDEO_FORCE_TRANSCODE."""
 
     if file_path.suffix.lower() != ".mp4":
+        return
+    # Уже совместимо с iOS — не жжём CPU полным перекодом, ограничиваемся faststart (-c copy).
+    if _is_ios_ready_mp4(file_path):
+        logger.info("ios transcode skipped (already h264/yuv420p): %s", file_path.name)
+        _maybe_faststart_mp4(file_path)
         return
     out = file_path.with_name(file_path.stem + "._ios.mp4")
     try:

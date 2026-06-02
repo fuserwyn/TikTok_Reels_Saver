@@ -13,7 +13,11 @@ from pyrogram.enums import ChatAction
 from pyrogram.errors import RPCError
 from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup, Message
 
-from bot.config import TELEGRAM_BOT_VIDEO_MAX_BYTES, max_download_bytes_for_pipeline
+from bot.config import (
+    TELEGRAM_BOT_VIDEO_MAX_BYTES,
+    load_max_concurrent_jobs,
+    max_download_bytes_for_pipeline,
+)
 from bot.db import fetch_user_stats, increment_download_request
 from bot.pyrogram_upload import send_large_video_as_user
 from social_video_fetch import (
@@ -26,6 +30,17 @@ from social_video_fetch import (
 )
 
 logger = logging.getLogger(__name__)
+
+# Ограничивает число одновременных тяжёлых пайплайнов (скачивание + ffmpeg),
+# чтобы пара параллельных запросов не выжрала CPU/RAM/диск на хостинге.
+_JOB_SEMAPHORE: asyncio.Semaphore | None = None
+
+
+def _job_semaphore() -> asyncio.Semaphore:
+    global _JOB_SEMAPHORE
+    if _JOB_SEMAPHORE is None:
+        _JOB_SEMAPHORE = asyncio.Semaphore(load_max_concurrent_jobs())
+    return _JOB_SEMAPHORE
 
 
 @dataclass
@@ -53,6 +68,124 @@ def _user_text_for_social_error(exc: SocialVideoError) -> str:
         "Не вышлось скачать. Попробуй другую ссылку, обнови yt-dlp в контейнере "
         "или укажи YT_DLP_COOKIEFILE (Netscape cookies.txt с нужного сайта)."
     )
+
+
+async def _handle_download(
+    client: Client,
+    ctx: HandlerContext,
+    message: Message,
+    status: Message,
+    url: str,
+) -> None:
+    """Тяжёлый пайплайн (скачивание + ffmpeg + отправка). Вызывается под семафором."""
+
+    await client.send_chat_action(message.chat.id, ChatAction.UPLOAD_VIDEO)
+    try:
+        download_cap = max_download_bytes_for_pipeline(ctx.max_upload_bytes)
+        clip = await download_social_video(url, download_cap)
+    except SocialVideoTooLargeError as exc:
+        await status.edit_text(
+            f"Файл ~{exc.size_bytes / 1024 / 1024:.1f} МБ — больше лимита скачивания "
+            f"({exc.limit_bytes // 1024 // 1024} МБ). Увеличь MAX_DOWNLOAD_BYTES в Railway "
+            "(или MAX_UPLOAD_BYTES), если нужны очень крупные исходники."
+        )
+        return
+    except SocialVideoError as exc:
+        logger.warning("download failed: %s", exc)
+        await status.edit_text(_user_text_for_social_error(exc))
+        return
+    except Exception:
+        logger.exception("unexpected download error")
+        await status.edit_text("Внутренняя ошибка, попробуй позже.")
+        return
+
+    low = clip.webpage_url.lower()
+    if "instagram.com" in low or "instagr.am" in low:
+        open_label, open_url = "Открыть в Instagram", clip.webpage_url
+    elif "tiktok.com" in low:
+        open_label, open_url = "Открыть в TikTok", clip.webpage_url
+    else:
+        open_label, open_url = "Открыть", clip.webpage_url
+
+    kb = InlineKeyboardMarkup(
+        inline_keyboard=[[InlineKeyboardButton(text=open_label, url=open_url)]]
+    )
+
+    try:
+        safe = re.sub(r"[^\w\-]+", "_", clip.title)[:80] or "video"
+        vext = clip.file_path.suffix.lower()
+        if vext not in (".mp4", ".webm"):
+            vext = ".mp4"
+        me = await client.get_me()
+        if me and me.username:
+            credit = f"\n\nВидео сгенерировано ботом @{html.escape(me.username)}"
+        else:
+            credit = ""
+        cap_title = html.escape(clip.title)
+        cap_artist = html.escape(clip.artist or "")
+        caption = f"<b>{cap_title}</b>\n{cap_artist}{credit}"
+        file_size = clip.file_path.stat().st_size
+        if file_size > TELEGRAM_BOT_VIDEO_MAX_BYTES:
+            await status.edit_text("Ожидайте…")
+            await client.send_chat_action(message.chat.id, ChatAction.UPLOAD_VIDEO)
+            await asyncio.to_thread(
+                compress_clip_to_max_bytes,
+                clip,
+                TELEGRAM_BOT_VIDEO_MAX_BYTES,
+            )
+            file_size = clip.file_path.stat().st_size
+            vext = clip.file_path.suffix.lower()
+            if vext not in (".mp4", ".webm"):
+                vext = ".mp4"
+
+        if file_size <= TELEGRAM_BOT_VIDEO_MAX_BYTES:
+            send_kw: dict = {
+                "video": str(clip.file_path),
+                "file_name": f"{safe}{vext}",
+                "caption": caption,
+                "duration": clip.actual_duration or clip.duration or 0,
+                "supports_streaming": True,
+                "reply_markup": kb,
+                "reply_to_message_id": message.id,
+            }
+            if clip.width is not None and clip.height is not None:
+                send_kw["width"] = clip.width
+                send_kw["height"] = clip.height
+            await client.send_video(message.chat.id, **send_kw)
+        elif ctx.user_client is not None:
+            try:
+                await send_large_video_as_user(
+                    ctx.user_client,
+                    message.chat.id,
+                    clip,
+                    caption,
+                    open_label,
+                    open_url,
+                    file_name=f"{safe}{vext}",
+                )
+            except RPCError:
+                logger.exception("pyrogram user send failed (RPC)")
+                await status.edit_text(
+                    "Скачал большое видео, но не удалось отправить через личный аккаунт (Telegram). "
+                    "Часто мешают настройки приватности — напиши аккаунту сессии в личку или попробуй позже."
+                )
+                return
+        else:
+            await status.edit_text(
+                f"Файл ~{file_size / 1024 / 1024:.1f} МБ — перекодированием в ~50 МБ не удалось. "
+                "Добавь TELEGRAM_SESSION (Pyrogram), чтобы отправить крупный оригинал. См. .env.example."
+            )
+            return
+
+        try:
+            await status.delete()
+        except Exception:
+            pass
+    except Exception:
+        logger.exception("send video failed")
+        await status.edit_text("Скачал, но не удалось отправить видео.")
+    finally:
+        clip.cleanup()
 
 
 def register_handlers(bot: Client, ctx: HandlerContext) -> None:
@@ -100,110 +233,11 @@ def register_handlers(bot: Client, ctx: HandlerContext) -> None:
             logger.exception("increment_download_request failed")
 
         status = await message.reply_text("Качаю…")
-        await client.send_chat_action(message.chat.id, ChatAction.UPLOAD_VIDEO)
-        try:
-            download_cap = max_download_bytes_for_pipeline(ctx.max_upload_bytes)
-            clip = await download_social_video(url, download_cap)
-        except SocialVideoTooLargeError as exc:
-            await status.edit_text(
-                f"Файл ~{exc.size_bytes / 1024 / 1024:.1f} МБ — больше лимита скачивания "
-                f"({exc.limit_bytes // 1024 // 1024} МБ). Увеличь MAX_DOWNLOAD_BYTES в Railway "
-                "(или MAX_UPLOAD_BYTES), если нужны очень крупные исходники."
-            )
-            return
-        except SocialVideoError as exc:
-            logger.warning("download failed: %s", exc)
-            await status.edit_text(_user_text_for_social_error(exc))
-            return
-        except Exception:
-            logger.exception("unexpected download error")
-            await status.edit_text("Внутренняя ошибка, попробуй позже.")
-            return
-
-        low = clip.webpage_url.lower()
-        if "instagram.com" in low or "instagr.am" in low:
-            open_label, open_url = "Открыть в Instagram", clip.webpage_url
-        elif "tiktok.com" in low:
-            open_label, open_url = "Открыть в TikTok", clip.webpage_url
-        else:
-            open_label, open_url = "Открыть", clip.webpage_url
-
-        kb = InlineKeyboardMarkup(
-            inline_keyboard=[[InlineKeyboardButton(text=open_label, url=open_url)]]
-        )
-
-        try:
-            safe = re.sub(r"[^\w\-]+", "_", clip.title)[:80] or "video"
-            vext = clip.file_path.suffix.lower()
-            if vext not in (".mp4", ".webm"):
-                vext = ".mp4"
-            me = await client.get_me()
-            if me and me.username:
-                credit = f"\n\nВидео сгенерировано ботом @{html.escape(me.username)}"
-            else:
-                credit = ""
-            cap_title = html.escape(clip.title)
-            cap_artist = html.escape(clip.artist or "")
-            caption = f"<b>{cap_title}</b>\n{cap_artist}{credit}"
-            file_size = clip.file_path.stat().st_size
-            if file_size > TELEGRAM_BOT_VIDEO_MAX_BYTES:
-                await status.edit_text("Ожидайте…")
-                await client.send_chat_action(message.chat.id, ChatAction.UPLOAD_VIDEO)
-                await asyncio.to_thread(
-                    compress_clip_to_max_bytes,
-                    clip,
-                    TELEGRAM_BOT_VIDEO_MAX_BYTES,
-                )
-                file_size = clip.file_path.stat().st_size
-                vext = clip.file_path.suffix.lower()
-                if vext not in (".mp4", ".webm"):
-                    vext = ".mp4"
-
-            if file_size <= TELEGRAM_BOT_VIDEO_MAX_BYTES:
-                send_kw: dict = {
-                    "video": str(clip.file_path),
-                    "file_name": f"{safe}{vext}",
-                    "caption": caption,
-                    "duration": clip.actual_duration or clip.duration or 0,
-                    "supports_streaming": True,
-                    "reply_markup": kb,
-                    "reply_to_message_id": message.id,
-                }
-                if clip.width is not None and clip.height is not None:
-                    send_kw["width"] = clip.width
-                    send_kw["height"] = clip.height
-                await client.send_video(message.chat.id, **send_kw)
-            elif ctx.user_client is not None:
-                try:
-                    await send_large_video_as_user(
-                        ctx.user_client,
-                        message.chat.id,
-                        clip,
-                        caption,
-                        open_label,
-                        open_url,
-                        file_name=f"{safe}{vext}",
-                    )
-                except RPCError:
-                    logger.exception("pyrogram user send failed (RPC)")
-                    await status.edit_text(
-                        "Скачал большое видео, но не удалось отправить через личный аккаунт (Telegram). "
-                        "Часто мешают настройки приватности — напиши аккаунту сессии в личку или попробуй позже."
-                    )
-                    return
-            else:
-                await status.edit_text(
-                    f"Файл ~{file_size / 1024 / 1024:.1f} МБ — перекодированием в ~50 МБ не удалось. "
-                    "Добавь TELEGRAM_SESSION (Pyrogram), чтобы отправить крупный оригинал. См. .env.example."
-                )
-                return
-
+        sem = _job_semaphore()
+        if sem.locked():
             try:
-                await status.delete()
+                await status.edit_text("В очереди…")
             except Exception:
                 pass
-        except Exception:
-            logger.exception("send video failed")
-            await status.edit_text("Скачал, но не удалось отправить видео.")
-        finally:
-            clip.cleanup()
+        async with sem:
+            await _handle_download(client, ctx, message, status, url)

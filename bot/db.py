@@ -50,10 +50,20 @@ def _ssl_arg_for_url(url: str) -> Any:
     return True
 
 
+def _pool_max_size() -> int:
+    """DB_POOL_MAX_SIZE — потолок коннектов; боту хватает единиц (один UPSERT на сообщение)."""
+
+    raw = (os.getenv("DB_POOL_MAX_SIZE") or "").strip()
+    try:
+        return max(1, int(raw)) if raw else 4
+    except ValueError:
+        return 4
+
+
 async def create_pool(database_url: str) -> asyncpg.Pool:
     url = normalize_database_url(database_url)
     ssl = _ssl_arg_for_url(url)
-    pool = await asyncpg.create_pool(url, min_size=1, max_size=10, ssl=ssl)
+    pool = await asyncpg.create_pool(url, min_size=1, max_size=_pool_max_size(), ssl=ssl)
     ssl_log = "false" if ssl is False else ("no-verify" if isinstance(ssl, ssl_module.SSLContext) else "verify")
     logger.info("PostgreSQL pool ready (ssl=%s)", ssl_log)
     return pool

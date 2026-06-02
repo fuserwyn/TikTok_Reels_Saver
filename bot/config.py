@@ -73,6 +73,16 @@ def load_stats_admin_ids() -> FrozenSet[int]:
     return frozenset(ids)
 
 
+def load_max_concurrent_jobs() -> int:
+    """Сколько тяжёлых пайплайнов (скачивание + ffmpeg) разрешено параллельно. Защита CPU/RAM/диска."""
+
+    raw = (os.getenv("MAX_CONCURRENT_JOBS") or "").strip()
+    try:
+        return max(1, int(raw)) if raw else 2
+    except ValueError:
+        return 2
+
+
 def load_ytdlp_autoupdate_hours() -> float:
     """Интервал автообновления yt-dlp в часах (0 = выключено)."""
     raw = (os.getenv("YT_DLP_AUTOUPDATE_HOURS") or "").strip()

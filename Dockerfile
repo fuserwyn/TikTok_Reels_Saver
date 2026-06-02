@@ -13,8 +13,7 @@ RUN apt-get update \
 WORKDIR /app
 
 COPY requirements.txt ./
-RUN pip install -r requirements.txt \
- && pip install --upgrade yt-dlp
+RUN pip install -r requirements.txt -U yt-dlp
 
 # Контекст сборки = корень этого мини-проекта (рядом с Dockerfile)
 COPY social_video_fetch/__init__.py ./social_video_fetch/__init__.py
