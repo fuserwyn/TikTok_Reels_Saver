@@ -27,6 +27,7 @@ from social_video_fetch import (
     download_social_video,
     find_instagram_reel_url,
     find_tiktok_url,
+    find_youtube_url,
 )
 
 logger = logging.getLogger(__name__)
@@ -63,6 +64,12 @@ def _user_text_for_social_error(exc: SocialVideoError) -> str:
             "Не вышло скачать с Reels. Обнови образ (свежий yt-dlp) — у Instagram правки "
             "выходят часто. С IP хостинга часто нужны cookies и YT_DLP_COOKIEFILE. "
             "Или открой ролик в браузере без входа — если там не идёт, бот не скачает."
+        )
+    if "youtube" in s or "youtu.be" in s or "youtu" in s:
+        return (
+            "Не вышло скачать с YouTube. Обнови yt-dlp в образе. С IP хостинга YouTube "
+            "часто просит подтвердить, что ты не бот — укажи YT_DLP_COOKIEFILE "
+            "(Netscape cookies.txt с youtube.com)."
         )
     return (
         "Не вышлось скачать. Попробуй другую ссылку, обнови yt-dlp в контейнере "
@@ -104,6 +111,8 @@ async def _handle_download(
         open_label, open_url = "Открыть в Instagram", clip.webpage_url
     elif "tiktok.com" in low:
         open_label, open_url = "Открыть в TikTok", clip.webpage_url
+    elif "youtube.com" in low or "youtu.be" in low:
+        open_label, open_url = "Открыть в YouTube", clip.webpage_url
     else:
         open_label, open_url = "Открыть", clip.webpage_url
 
@@ -206,23 +215,28 @@ def register_handlers(bot: Client, ctx: HandlerContext) -> None:
     @bot.on_message(filters.private & filters.command("start"))
     async def on_start(_: Client, message: Message) -> None:
         await message.reply_text(
-            "Ссылка на TikTok или Reels в этот чат — пришлю видео.",
+            "Ссылка на TikTok, Reels или YouTube Shorts в этот чат — пришлю видео.",
         )
 
     @bot.on_message(filters.private & filters.command("help"))
     async def on_help(_: Client, message: Message) -> None:
         await message.reply_text(
-            "Ссылка на TikTok или Reels в этот чат — пришлю видео.",
+            "Ссылка на TikTok, Reels или YouTube Shorts в этот чат — пришлю видео.",
         )
 
     @bot.on_message(filters.private & filters.text & ~filters.regex("^/"))
     async def on_text(client: Client, message: Message) -> None:
         text = message.text or ""
-        url = find_tiktok_url(text) or find_instagram_reel_url(text)
+        url = (
+            find_tiktok_url(text)
+            or find_instagram_reel_url(text)
+            or find_youtube_url(text)
+        )
         if not url:
             await message.reply_text(
-                "Нужна ссылка TikTok (tiktok.com, vm.tiktok.com, …) "
-                "или Reels (instagram.com/reel/…).",
+                "Нужна ссылка TikTok (tiktok.com, vm.tiktok.com, …), "
+                "Reels (instagram.com/reel/…) "
+                "или YouTube Shorts (youtube.com/shorts/…, youtu.be/…).",
             )
             return
 

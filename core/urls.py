@@ -13,6 +13,14 @@ TIKTOK_URL_RE = re.compile(
     re.IGNORECASE,
 )
 
+YOUTUBE_URL_RE = re.compile(
+    r"https?://(?:"
+    r"(?:www\.|m\.|music\.)?youtube\.com/(?:shorts/|watch\?|live/|embed/|v/)[^\s]+"
+    r"|youtu\.be/[^\s]+"
+    r")",
+    re.IGNORECASE,
+)
+
 
 def strip_trailing_junk(url: str) -> str:
     while url and url[-1] in ").,];\"'":
@@ -46,4 +54,9 @@ def find_instagram_reel_url(text: str) -> str | None:
 
 def find_tiktok_url(text: str) -> str | None:
     match = TIKTOK_URL_RE.search(text or "")
+    return strip_trailing_junk(match.group(0)) if match else None
+
+
+def find_youtube_url(text: str) -> str | None:
+    match = YOUTUBE_URL_RE.search(text or "")
     return strip_trailing_junk(match.group(0)) if match else None
