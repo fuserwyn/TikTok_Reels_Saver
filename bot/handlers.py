@@ -52,24 +52,39 @@ class HandlerContext:
     user_client: Client | None
 
 
-def _user_text_for_social_error(exc: SocialVideoError) -> str:
+def _user_text_for_social_error(exc: SocialVideoError, url: str = "") -> str:
+    # Платформу определяем по самой ссылке запроса, а не по тексту ошибки:
+    # при 429/сетевых сбоях сообщение yt-dlp не содержит имени площадки.
     s = str(exc).lower()
-    if "tiktok" in s:
+    low = (url or "").lower()
+    bot_or_rate = (
+        "429" in s
+        or "sign in to confirm" in s
+        or "not a bot" in s
+        or "too many requests" in s
+    )
+    if "tiktok.com" in low or "tiktok" in s:
         return (
             "Не вышло скачать с TikTok. Попробуй полную ссылку @…/video/…, обнови "
             "yt-dlp в образе или укажи YT_DLP_COOKIEFILE / cookies c сайта."
         )
-    if "instagram" in s or "reel" in s:
-        return (
-            "Не вышло скачать с Reels. Обнови образ (свежий yt-dlp) — у Instagram правки "
-            "выходят часто. С IP хостинга часто нужны cookies и YT_DLP_COOKIEFILE. "
-            "Или открой ролик в браузере без входа — если там не идёт, бот не скачает."
-        )
-    if "youtube" in s or "youtu.be" in s or "youtu" in s:
+    if "youtube.com" in low or "youtu.be" in low or "youtube" in s:
+        if bot_or_rate:
+            return (
+                "YouTube временно ограничил скачивание с IP хостинга (просит подтвердить, "
+                "что ты не бот / слишком много запросов). Подожди пару минут и попробуй "
+                "снова, либо укажи YT_DLP_COOKIEFILE (Netscape cookies.txt с youtube.com)."
+            )
         return (
             "Не вышло скачать с YouTube. Обнови yt-dlp в образе. С IP хостинга YouTube "
             "часто просит подтвердить, что ты не бот — укажи YT_DLP_COOKIEFILE "
             "(Netscape cookies.txt с youtube.com)."
+        )
+    if "instagram.com" in low or "instagr.am" in low or "instagram" in s or "reel" in s:
+        return (
+            "Не вышло скачать с Reels. Обнови образ (свежий yt-dlp) — у Instagram правки "
+            "выходят часто. С IP хостинга часто нужны cookies и YT_DLP_COOKIEFILE. "
+            "Или открой ролик в браузере без входа — если там не идёт, бот не скачает."
         )
     return (
         "Не вышлось скачать. Попробуй другую ссылку, обнови yt-dlp в контейнере "
@@ -99,7 +114,7 @@ async def _handle_download(
         return
     except SocialVideoError as exc:
         logger.warning("download failed: %s", exc)
-        await status.edit_text(_user_text_for_social_error(exc))
+        await status.edit_text(_user_text_for_social_error(exc, url))
         return
     except Exception:
         logger.exception("unexpected download error")

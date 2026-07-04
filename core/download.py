@@ -90,6 +90,28 @@ def _merge_instagram_extractor_opts(opts: dict[str, Any]) -> None:
     logger.info("instagram extractor app_id from INSTAGRAM_APP_ID")
 
 
+def _merge_youtube_extractor_opts(opts: dict[str, Any]) -> None:
+    """Устойчивость YouTube на IP хостинга.
+
+    Периодический «Sign in to confirm you're not a bot» / HTTP 429 идёт от `web`-клиента
+    YouTube (ему нужен PO-токен). Берём набор клиентов `default,-web`: остаются tv/ios/
+    android/mweb и т.п., которые бот-чек не триггерят, но отдают нормальные avc1+m4a.
+    Переопределяется через YOUTUBE_PLAYER_CLIENT (список через запятую).
+    """
+
+    raw = (os.getenv("YOUTUBE_PLAYER_CLIENT") or "default,-web").strip()
+    clients = [c.strip() for c in raw.split(",") if c.strip()]
+    ex = dict(opts.get("extractor_args") or {})
+    yt = dict(ex.get("youtube") or {})
+    if clients:
+        yt["player_client"] = clients
+    ex["youtube"] = yt
+    opts["extractor_args"] = ex
+    # Больше попыток на извлечение — 429/временные блоки часто проходят со второй.
+    opts.setdefault("extractor_retries", 3)
+    logger.info("youtube player_client=%s", clients)
+
+
 # Не подменяем http_headers для Instagram — у yt-dlp свои заголовки API (X-IG-App-ID и т.д.);
 # подмена «браузерным» UA ломала скачивание с Railway без cookies.
 
@@ -543,6 +565,8 @@ def _download_merged_mp4_sync(url: str, work_dir: Path) -> ShortVideoDownload:
         opts["http_headers"] = {"User-Agent": TIKTOK_UA}
     elif "instagram.com" in low or "instagr.am" in low:
         _merge_instagram_extractor_opts(opts)
+    elif "youtube.com" in low or "youtu.be" in low:
+        _merge_youtube_extractor_opts(opts)
 
     with YoutubeDL(opts) as ydl:
         try:
