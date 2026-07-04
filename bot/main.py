@@ -17,6 +17,7 @@ from bot.config import (
     load_user_session_string,
     load_ytdlp_autoupdate_hours,
 )
+from bot.cookie_bootstrap import bootstrap_cookies_file_from_env
 from bot.db import create_pool, init_schema
 from bot.handlers import HandlerContext, register_handlers
 from bot.pyrogram_upload import TELEGRAM_USER_VIDEO_MAX_BYTES
@@ -57,6 +58,12 @@ async def _ytdlp_autoupdate_loop(interval_hours: float) -> None:
 async def run() -> None:
     _configure_logging()
     log = logging.getLogger("social_video_bot")
+
+    # Материализуем cookies.txt из COOKIES_TXT_B64 / COOKIES_TXT (удобно на Railway без volume).
+    try:
+        bootstrap_cookies_file_from_env()
+    except Exception:
+        log.exception("cookies bootstrap failed")
 
     token, max_bytes, max_upload_explicit = load_settings()
     mt = load_mtproto_app_credentials()

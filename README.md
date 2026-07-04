@@ -40,9 +40,15 @@ python -m bot.main
 1. New Project → Deploy from GitHub (или пустой репо + `railway up`).
 2. **Root Directory** оставь пустым, если репозиторий = только эта папка; если монорепо — укажи подпапку с этим проектом.
 3. **Variables**: `TELEGRAM_API_KEY` или `BOT_TOKEN`; **`API_ID` и `API_HASH`** (my.telegram.org) — обязательны для Pyrogram, как в WAV-боте. Для видео >50 МБ: `TELEGRAM_SESSION` (строка Pyrogram, не Telethon).
-   - Для Reels/TikTok на IP хостинга часто нужен `cookies.txt` (формат Netscape):
-     1) добавь файл в volume/диск (например `/data/cookies.txt`);
-     2) укажи переменную `YT_DLP_COOKIEFILE=/data/cookies.txt`.
+   - Для Reels/TikTok/YouTube на IP хостинга часто нужен `cookies.txt` (формат Netscape). Два способа:
+     - **Проще (без volume):** экспортируй `cookies.txt` (расширение браузера «Get cookies.txt»),
+       закодируй `base64 -w0 cookies.txt` (macOS: `base64 -i cookies.txt | tr -d '\n'`) и вставь
+       результат в переменную-секрет `COOKIES_TXT_B64`. Бот при старте сам запишет файл и подставит
+       его в yt-dlp — больше ничего указывать не нужно.
+     - **Через volume:** добавь файл в диск (например `/data/cookies.txt`) и укажи
+       `YT_DLP_COOKIEFILE=/data/cookies.txt`.
+     - Для YouTube экспортируй cookies именно с `youtube.com` (лучше из отдельного/второстепенного
+       аккаунта — cookies дают доступ к аккаунту).
    - Можно включить автообновление `yt-dlp` в рантайме: `YT_DLP_AUTOUPDATE_HOURS=24` (раз в сутки).
    - После апдейтов Instagram пересобирай сервис, чтобы подтянуть свежий `yt-dlp`.
 4. **PostgreSQL** (опционально, чтобы считать пользователей): New → Database → PostgreSQL; Railway пробросит `DATABASE_URL` в переменные сервиса с ботом. Для `/stats` укажи `STATS_ADMIN_IDS` = свой Telegram numeric ID (узнать у @userinfobot). Если при старте `CERTIFICATE_VERIFY_FAILED` — добавь переменную **`DATABASE_SSL=no-verify`**.
