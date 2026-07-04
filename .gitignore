@@ -1,3 +1,7 @@
 .env
 __pycache__/
 *.py[cod]
+# Секреты — cookies никогда не коммитим
+cookies.txt
+*cookies*.txt
+.DS_Store

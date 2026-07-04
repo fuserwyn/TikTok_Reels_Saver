@@ -9,6 +9,42 @@ from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
+# Короткоживущие Google/YouTube cookie: браузер их постоянно ротирует, поэтому в выгрузке
+# они почти всегда уже протухли. Со свежим __Secure-1PSID стабильная сессия работает, а вот
+# протухший __Secure-1PSIDTS ломает ответ YouTube (форматы не отдаются). Вырезаем их —
+# это рекомендованный воркэраунд yt-dlp. Отключается через COOKIES_KEEP_ROTATION=1.
+_VOLATILE_COOKIE_NAMES = frozenset(
+    {
+        "__Secure-1PSIDTS",
+        "__Secure-3PSIDTS",
+        "SIDCC",
+        "__Secure-1PSIDCC",
+        "__Secure-3PSIDCC",
+    }
+)
+
+
+def _sanitize_cookie_text(text: str) -> str:
+    """Убрать протухающие ротационные Google-cookie из Netscape cookies.txt."""
+
+    if (os.getenv("COOKIES_KEEP_ROTATION") or "").strip().lower() in ("1", "true", "yes", "on"):
+        return text
+    kept: list[str] = []
+    dropped = 0
+    for line in text.splitlines():
+        if line and not line.startswith("#"):
+            parts = line.split("\t")
+            if len(parts) >= 7 and parts[5] in _VOLATILE_COOKIE_NAMES:
+                dropped += 1
+                continue
+        kept.append(line)
+    if dropped:
+        logger.info("cookies: убрано %s ротационных Google-cookie (см. COOKIES_KEEP_ROTATION)", dropped)
+    out = "\n".join(kept)
+    if not out.endswith("\n"):
+        out += "\n"
+    return out
+
 
 def _cookie_target_path() -> Path:
     """Куда писать cookies.txt.
@@ -59,22 +95,19 @@ def bootstrap_cookies_file_from_env() -> Path | None:
         except (binascii.Error, ValueError) as exc:
             logger.error("COOKIES_TXT_B64: invalid base64 (%s)", exc)
             return None
-        try:
-            path.write_bytes(data)
-        except OSError as exc:
-            logger.warning("cookies bootstrap: cannot write %s: %s", path, exc)
-            return None
-        logger.info("Cookies file written from COOKIES_TXT_B64 → %s (%s bytes).", path, len(data))
+        source = "COOKIES_TXT_B64"
+        text = data.decode("utf-8", errors="replace")
     else:
+        source = "COOKIES_TXT"
         text = raw_env
-        if not text.endswith("\n"):
-            text += "\n"
-        try:
-            path.write_text(text, encoding="utf-8")
-        except OSError as exc:
-            logger.warning("cookies bootstrap: cannot write %s: %s", path, exc)
-            return None
-        logger.info("Cookies file written from COOKIES_TXT → %s", path)
+
+    text = _sanitize_cookie_text(text)
+    try:
+        path.write_text(text, encoding="utf-8")
+    except OSError as exc:
+        logger.warning("cookies bootstrap: cannot write %s: %s", path, exc)
+        return None
+    logger.info("Cookies file written from %s → %s (%s bytes).", source, path, len(text.encode("utf-8")))
 
     # Чтобы core.cookies.apply_ytdlp_cookiefile нашёл файл даже без явного YT_DLP_COOKIEFILE.
     os.environ["YT_DLP_COOKIEFILE"] = str(path.resolve())
