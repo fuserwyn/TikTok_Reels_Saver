@@ -106,6 +106,17 @@ def _merge_youtube_extractor_opts(opts: dict[str, Any]) -> None:
     if clients:
         yt["player_client"] = clients
     ex["youtube"] = yt
+
+    # PO-token провайдер (bgutil). На IP датацентра YouTube без PO-токена форсит SABR и не
+    # отдаёт ссылки на форматы. Плагин bgutil-ytdlp-pot-provider берёт токен с HTTP-сервиса.
+    # Включается только если задан BGUTIL_POT_BASE_URL (иначе поведение не меняется).
+    pot = (os.getenv("BGUTIL_POT_BASE_URL") or "").strip()
+    if len(pot) >= 2 and pot[0] in "\"'" and pot[-1] == pot[0]:
+        pot = pot[1:-1].strip()
+    if pot:
+        ex["youtubepot-bgutilhttp"] = {"base_url": [pot.rstrip("/")]}
+        logger.info("youtube PO-token provider (bgutil) at %s", pot.rstrip("/"))
+
     opts["extractor_args"] = ex
     # Больше попыток на извлечение — 429/временные блоки часто проходят со второй.
     opts.setdefault("extractor_retries", 3)
